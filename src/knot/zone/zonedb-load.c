@@ -318,7 +318,8 @@ static zone_t *reuse_member_zone(zone_t *zone, server_t *server, conf_t *conf,
 		conf_activate_modules(conf, server, newzone->name, &newzone->query_modules,
 		                      &newzone->query_plan);
 	}
-	zone->change_type |= CONF_IO_TRELOAD;
+	zone->change_type |= CONF_IO_TUNSET;
+	zone->contents = NULL;
 
 	return newzone;
 }
