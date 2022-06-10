@@ -56,6 +56,9 @@ static void print_dname(const knot_dname_t *d)
 static int catalog_print_cb(const knot_dname_t *mem, const knot_dname_t *ow,
                             const knot_dname_t *cz, const char *group, void *ctx)
 {
+	if (filter_catalog && knot_dname_cmp(filter_catalog, cz) != 0) {
+		return KNOT_EOK;
+	}
 	print_dname(mem);
 	print_dname(ow);
 	print_dname(cz);
@@ -73,7 +76,7 @@ static void catalog_print(catalog_t *cat)
 	if (cat != NULL) {
 		int ret = catalog_open(cat);
 		if (ret == KNOT_EOK) {
-			ret = catalog_apply(cat, NULL, catalog_print_cb, &total, false);
+			ret = catalog_apply(cat, filter_member, catalog_print_cb, &total, false);
 		}
 		if (ret != KNOT_EOK) {
 			ERR2("failed to print catalog (%s)\n", knot_strerror(ret));
