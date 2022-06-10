@@ -30,16 +30,19 @@ static knot_dname_t *filter_catalog = NULL;
 
 static void print_help(void)
 {
-	printf("Usage: %s [-c | -C | -D <path>] [parameters]\n"
+	printf("Usage: %s [-c | -C | -D <path>] [-a | -m <name>] [parameters]\n"
 	       "\n"
 	       "Parameters:\n"
-	       " -c, --config <file> Path to a textual configuration file.\n"
-	       "                      (default %s)\n"
-	       " -C, --confdb <dir>  Path to a configuration database directory.\n"
-	       "                      (default %s)\n"
-	       " -D, --dir <path>    Path to a catalog database directory, use default configuration.\n"
-	       " -h, --help          Print the program help.\n"
-	       " -V, --version       Print the program version.\n",
+	       " -c, --config <file>          Path to a textual configuration file.\n"
+	       "                                (default %s)\n"
+	       " -C, --confdb <dir>           Path to a configuration database directory.\n"
+	       "                                (default %s)\n"
+	       " -D, --dir <path>             Path to a catalog database directory, use default\n"
+	       "                                configuration.\n"
+	       " -a, --filter-catalog <name>  Filter output by catalog zone name.\n"
+	       " -m, --filter-member <name>   Filter output by member zone name.\n"
+	       " -h, --help                   Print the program help.\n"
+	       " -V, --version                Print the program version.\n",
 	       PROGRAM_NAME, CONF_DEFAULT_FILE, CONF_DEFAULT_DBDIR);
 }
 
