@@ -25,6 +25,9 @@
 
 #define PROGRAM_NAME	"kcatalogprint"
 
+static knot_dname_t *filter_member = NULL;
+static knot_dname_t *filter_catalog = NULL;
+
 static void print_help(void)
 {
 	printf("Usage: %s [-c | -C | -D <path>] [parameters]\n"
@@ -81,16 +84,18 @@ static void catalog_print(catalog_t *cat)
 int main(int argc, char *argv[])
 {
 	struct option opts[] = {
-		{ "config",  required_argument, NULL, 'c' },
-		{ "confdb",  required_argument, NULL, 'C' },
-		{ "dir",     required_argument, NULL, 'D' },
-		{ "help",    no_argument,       NULL, 'h' },
-		{ "version", no_argument,       NULL, 'V' },
+		{ "filter-catalog",  required_argument, NULL, 'a' },
+		{ "config",          required_argument, NULL, 'c' },
+		{ "confdb",          required_argument, NULL, 'C' },
+		{ "dir",             required_argument, NULL, 'D' },
+		{ "filter-member",   required_argument, NULL, 'm' },
+		{ "help",            no_argument,       NULL, 'h' },
+		{ "version",         no_argument,       NULL, 'V' },
 		{ NULL }
 	};
 
 	int opt = 0;
-	while ((opt = getopt_long(argc, argv, "c:C:D:hV", opts, NULL)) != -1) {
+	while ((opt = getopt_long(argc, argv, "a:c:C:D:m:hV", opts, NULL)) != -1) {
 		switch (opt) {
 		case 'c':
 			if (util_conf_init_file(optarg) != KNOT_EOK) {
@@ -106,6 +111,14 @@ int main(int argc, char *argv[])
 			if (util_conf_init_justdb("catalog-db", optarg) != KNOT_EOK) {
 				goto failure;
 			}
+			break;
+		case 'a':
+			free(filter_catalog);
+			filter_catalog = knot_dname_from_str_alloc(optarg);
+			break;
+		case 'm':
+			free(filter_member);
+			filter_member = knot_dname_from_str_alloc(optarg);
 			break;
 		case 'h':
 			print_help();
@@ -139,7 +152,8 @@ int main(int argc, char *argv[])
 	free(db);
 	catalog_print(&c);
 	catalog_deinit(&c);
-
+	free(filter_member);
+	free(filter_catalog);
 success:
 	util_conf_deinit();
 	return EXIT_SUCCESS;
