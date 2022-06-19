@@ -240,6 +240,7 @@ int process_cmd(int argc, const char **argv, params_t *params)
 		.argc = argc - 1,
 		.argv = argv + 1,
 		.force = params->force,
+		.verbose = params->verbose,
 		.blocking = params->blocking
 	};
 

@@ -46,6 +46,7 @@ typedef struct {
 	const char **argv;
 	char flags[4];
 	bool force;
+	bool verbose;
 	bool blocking;
 } cmd_args_t;
 
