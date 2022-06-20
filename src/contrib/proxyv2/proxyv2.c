@@ -14,7 +14,7 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "knot/query/proxyv2.h"
+#include "contrib/proxyv2/proxyv2.h"
 
 #include <arpa/inet.h>
 #include <stdint.h>
