@@ -12,6 +12,7 @@ endif USE_GNUTLS_MEMSET
 EXTRA_DIST += \
 	contrib/licenses/0BSD			\
 	contrib/licenses/BSD-3-Clause		\
+	contrib/licenses/GPL-3.0		\
 	contrib/licenses/LGPL-2.0		\
 	contrib/licenses/LGPL-2.1		\
 	contrib/libbpf/LICENSE			\
