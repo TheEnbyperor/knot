@@ -800,7 +800,7 @@ int check_template(
 		                 C_TPL, option, catalog_tpl.data, \
 		                 catalog_tpl.len); \
 	if (val.code == KNOT_EOK) { \
-		args->err_str = option_string " can't be used in a catalog template"; \
+		args->err_str = option_string " in a catalog template"; \
 		return KNOT_EINVAL; \
 	} \
 }
