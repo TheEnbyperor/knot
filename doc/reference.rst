@@ -2460,6 +2460,9 @@ has the *group* property defined, matching another catalog template.
 .. NOTE::
    This option must be set if and only if :ref:`zone_catalog-role` is *interpret*.
 
+   Catalog templates can't use :ref:`zone_catalog-template`, :ref:`zone_catalog-role`,
+   :ref:`zone_catalog-zone`, and :ref:`zone_catalog-group` options.
+
 *Default:* not set
 
 .. _zone_catalog-zone:
