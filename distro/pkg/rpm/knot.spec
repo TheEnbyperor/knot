@@ -107,11 +107,12 @@ Requires:	%{name}-libs%{?_isa} = %{version}-%{release}
 The package contains development header files for the Knot DNS libraries
 included in knot-libs package.
 
-%package utils
+%package dnsutils
 Summary:	DNS client utilities shipped with the Knot DNS server
 Requires:	%{name}-libs%{?_isa} = %{version}-%{release}
+Provides:	knot-utils = %{version}-%{release}
 
-%description utils
+%description dnsutils
 The package contains DNS client utilities shipped with the Knot DNS server.
 
 %package module-dnstap
@@ -277,7 +278,7 @@ getent passwd knot >/dev/null || \
 %{_mandir}/man8/knotd.*
 %ghost %attr(770,root,knot) %dir %{_rundir}/knot
 
-%files utils
+%files dnsutils
 %{_bindir}/kdig
 %{_bindir}/khost
 %{_bindir}/knsec3hash
