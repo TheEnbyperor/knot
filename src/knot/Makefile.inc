@@ -12,8 +12,6 @@ include_libknotd_HEADERS = \
 	knot/include/module.h
 
 libknotd_la_SOURCES = \
-	contrib/proxyv2/proxyv2.c		\
-	contrib/proxyv2/proxyv2.h		\
 	knot/catalog/catalog_db.c		\
 	knot/catalog/catalog_db.h		\
 	knot/catalog/catalog_update.c		\

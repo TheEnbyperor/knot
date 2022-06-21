@@ -24,9 +24,12 @@
 #include "knot/include/module.h"
 #include "contrib/sockaddr.h"
 
-int proxyv2_decapsulate(void *base,
-			size_t len_base,
-			knot_pkt_t **query,
-			knotd_qdata_params_t *params,
-			struct sockaddr_storage *client,
-			knot_mm_t *mm);
+int proxyv2_header_offset(void *base, size_t len_base);
+int proxyv2_sockaddr_store(void *base, size_t len_base, struct sockaddr_storage *ss);
+
+// int proxyv2_decapsulate(void *base,
+// 			size_t len_base,
+// 			knot_pkt_t **query,
+// 			knotd_qdata_params_t *params,
+// 			struct sockaddr_storage *client,
+// 			knot_mm_t *mm);

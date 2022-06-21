@@ -91,10 +91,25 @@ static void udp_handle(udp_context_t *udp, int fd, struct sockaddr_storage *ss,
 		 * XXX: This behavior should probably be controlled by a config
 		 * option.
 		 */
-		ret = proxyv2_decapsulate(rx->iov_base, rx->iov_len,
-					  &query, &params, &proxied_remote,
-					  udp->layer.mm);
+		ret = proxyv2_header_offset(rx->iov_base, rx->iov_len);
+		if (ret > 0) {
+			knot_pkt_free(query);
 
+			/*
+			 * Re-parse the query message using the data in the
+			 * packet following the PROXY v2 payload.
+			 */
+			query = knot_pkt_new(rx->iov_base + ret,
+			                     rx->iov_len - ret,
+			                     udp->layer.mm);
+			ret = knot_pkt_parse(query, 0);
+			if (ret != KNOT_EOK) {
+				/* Failure. */
+				return ret;
+			}
+		}
+		struct sockaddr_storage proxy;
+		ret = proxyv2_sockaddr_store(rx->iov_base, rx->iov_len, &proxy);
 		if (ret != KNOT_EOK && query->parsed > 0) {
 			// artificially decreasing "parsed" leads to FORMERR
 			query->parsed--;
