@@ -109,58 +109,6 @@ void knot_xquic_free_creds(knot_xquic_creds_t *creds)
 	gnutls_anti_replay_deinit(creds->tls_anti_replay);
 }
 
-static int tls_secret_func(gnutls_session_t session,
-                           gnutls_record_encryption_level_t gtls_level,
-                           const void *rx_secret, const void *tx_secret,
-                           size_t secretlen)
-{
-	knot_xquic_conn_t *ctx = (knot_xquic_conn_t *)gnutls_session_get_ptr(session);
-	int level = ngtcp2_crypto_gnutls_from_gnutls_record_encryption_level(gtls_level);
-	if (rx_secret != NULL) {
-		int ret = ngtcp2_crypto_derive_and_install_rx_key(ctx->conn, NULL, NULL, NULL, level, rx_secret, secretlen);
-		if (ret != 0) {
-			return TLS_CALLBACK_ERR;
-		}
-	}
-
-	if (tx_secret != NULL) {
-		int ret = ngtcp2_crypto_derive_and_install_tx_key(ctx->conn, NULL, NULL, NULL, level, tx_secret, secretlen);
-		if (ret != 0) {
-			return TLS_CALLBACK_ERR;
-		}
-	}
-	return 0;
-}
-
-static int tls_read_func(gnutls_session_t session,
-                         gnutls_record_encryption_level_t gtls_level,
-                         gnutls_handshake_description_t htype, const void *data,
-                         size_t data_size)
-{
-	if (htype == GNUTLS_HANDSHAKE_CHANGE_CIPHER_SPEC) {
-		return 0;
-	}
-
-	knot_xquic_conn_t *ctx = (knot_xquic_conn_t *)gnutls_session_get_ptr(session);
-	int level = ngtcp2_crypto_gnutls_from_gnutls_record_encryption_level(gtls_level);
-	ngtcp2_conn_submit_crypto_data(ctx->conn, level, (const uint8_t *)data, data_size);
-	return 0;
-}
-
-static int tls_alert_read_func(gnutls_session_t session,
-                               gnutls_record_encryption_level_t level,
-                               gnutls_alert_level_t alert_level,
-                               gnutls_alert_description_t alert_desc)
-{
-	knot_xquic_conn_t *ctx = (knot_xquic_conn_t *)gnutls_session_get_ptr(session);
-	(void)(ctx);
-	(void)(level);
-	(void)(alert_level);
-	(void)(alert_desc);
-	printf("TLS alert %d\n", alert_desc);
-	return 0;
-}
-
 #define ALPN "\03""doq"
 #define ALPN_TMP "\07""doq-i11"
 
@@ -186,53 +134,6 @@ static int tls_client_hello_cb(gnutls_session_t session, unsigned int htype,
 	     memcmp(dq, alpn.data, alpn.size) != 0) &&
 	   ((unsigned int)ALPN_TMP[0] != alpn.size ||
 	     memcmp((const char *)&ALPN_TMP[1], alpn.data, alpn.size) != 0)) {
-		return TLS_CALLBACK_ERR;
-	}
-
-	return 0;
-}
-
-static int tls_tp_recv_func(gnutls_session_t session, const uint8_t *data,
-                            size_t datalen)
-{
-	ngtcp2_transport_params params;
-	knot_xquic_conn_t *ctx = (knot_xquic_conn_t *)gnutls_session_get_ptr(session);
-	ngtcp2_conn *conn = ctx->conn;
-	bool server = ngtcp2_conn_is_server(conn);
-	ngtcp2_transport_params_type ptype = server ? NGTCP2_TRANSPORT_PARAMS_TYPE_CLIENT_HELLO
-	                                            : NGTCP2_TRANSPORT_PARAMS_TYPE_ENCRYPTED_EXTENSIONS;
-
-	int ret = ngtcp2_decode_transport_params(&params, ptype, data, datalen);
-	if (ret != 0) {
-		return TLS_CALLBACK_ERR;
-	}
-
-	ret = ngtcp2_conn_set_remote_transport_params(conn, &params);
-	if (ret != 0) {
-		return TLS_CALLBACK_ERR;
-	}
-
-	return 0;
-}
-
-static int tls_tp_send_func(gnutls_session_t session, gnutls_buffer_t extdata)
-{
-	ngtcp2_transport_params params;
-	uint8_t buf[256];
-	knot_xquic_conn_t *ctx = (knot_xquic_conn_t *)gnutls_session_get_ptr(session);
-	ngtcp2_conn *conn = ctx->conn;
-	bool server = ngtcp2_conn_is_server(conn);
-	ngtcp2_transport_params_type ptype = server ? NGTCP2_TRANSPORT_PARAMS_TYPE_ENCRYPTED_EXTENSIONS
-	                                            : NGTCP2_TRANSPORT_PARAMS_TYPE_CLIENT_HELLO;
-
-	ngtcp2_conn_get_local_transport_params(conn, &params);
-	ssize_t nwrite = ngtcp2_encode_transport_params(buf, sizeof(buf), ptype, &params);
-	if (nwrite < 0) {
-		return TLS_CALLBACK_ERR;
-	}
-
-	int ret = gnutls_buffer_append_data(extdata, buf, nwrite);
-	if (ret != 0) {
 		return TLS_CALLBACK_ERR;
 	}
 
@@ -266,19 +167,11 @@ static int tls_init_conn_session(knot_xquic_conn_t *conn, bool server)
 		return TLS_CALLBACK_ERR;
 	}
 
-	gnutls_handshake_set_secret_function(conn->tls_session, tls_secret_func);
-	gnutls_handshake_set_read_function(conn->tls_session, tls_read_func);
-	gnutls_alert_set_read_function(conn->tls_session, tls_alert_read_func);
 	gnutls_handshake_set_hook_function(conn->tls_session,
 					   GNUTLS_HANDSHAKE_CLIENT_HELLO,
 	                                   GNUTLS_HOOK_POST, tls_client_hello_cb);
-	if (gnutls_session_ext_register(conn->tls_session,
-	                "QUIC Transport Parameters",
-	                NGTCP2_TLSEXT_QUIC_TRANSPORT_PARAMETERS_V1,
-	                GNUTLS_EXT_TLS, tls_tp_recv_func, tls_tp_send_func, NULL, NULL,
-	                NULL, GNUTLS_EXT_FLAG_TLS |
-	                GNUTLS_EXT_FLAG_CLIENT_HELLO | GNUTLS_EXT_FLAG_EE
-			) != 0) {
+	int ret = ngtcp2_crypto_gnutls_configure_server_session(conn->tls_session);
+	if (ret != 0) {
 		return TLS_CALLBACK_ERR;
 	}
 
@@ -566,7 +459,10 @@ static int conn_new(ngtcp2_conn **pconn, const ngtcp2_path *path, const ngtcp2_c
 		NULL, // ack_datagram
 		NULL, // lost_datagram
 		ngtcp2_crypto_get_path_challenge_data_cb,
-		NULL // stream_stop_sending
+		NULL, // stream_stop_sending
+		ngtcp2_crypto_version_negotiation_cb,
+		NULL, // recv_rx_key
+		NULL  // recv_tx_key
 	};
 
 	// II. SETTINGS
