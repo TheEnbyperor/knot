@@ -43,8 +43,17 @@ Options
   Zone event trigger commands wait until the event is finished. Control timeout
   is set to infinity if not forced by explicit timeout specification.
 
+**-e**, **--extended**
+  Show extended output (even empty items in zone status).
+
 **-f**, **--force**
   Forced operation. Overrides some checks.
+
+**-x**, **--mono**
+  Don't generate colorized output.
+
+**-X**, **--color**
+  Force colorized output in extended output or to a pipe.
 
 **-v**, **--verbose**
   Enable debug output.
@@ -81,7 +90,15 @@ Actions
 
 **zone-status** [*zone*...] [*filter*]
   Show the zone status. Filters are **+role**, **+serial**, **+transaction**,
-  **+events**, **+freeze**, and **+catalog**.
+  **+events**, **+freeze**, and **+catalog**. Empty zone parameters are omitted,
+  unless the **--extended** option is used. A single dash in the output represents
+  an unset value. Automatic colorization can be overruled using the **--mono** and
+  **--color** options.
+
+  The color code is:
+  *green* - zone acts as a master / *red* - zone acts as a slave,
+  *bold font (highlited)* - zone is active / *normal* - zone is empty,
+  *underscored* - zone is an interpreted catalog member.
 
 **zone-reload** [*zone*...]
   Trigger a zone reload from a disk without checking its modification time. For

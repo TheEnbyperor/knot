@@ -69,6 +69,9 @@ bit length of the key by number (default: optimal length given by algorithm). Th
 TSIG key is only displayed on \fIstdout\fP: the command does not create a file, nor include the
 key in a keystore.
 .TP
+\fB\-e\fP, \fB\-\-extended\fP
+Extended output (listing of keys with full description).
+.TP
 \fB\-j\fP, \fB\-\-json\fP
 Print the zones or keys in JSON format.
 .TP
@@ -81,9 +84,6 @@ Don\(aqt generate colorized output.
 .TP
 \fB\-X\fP, \fB\-\-color\fP
 Force colorized output in the normal mode.
-.TP
-\fB\-v\fP, \fB\-\-version\fP
-Listing of keys with full description.
 .TP
 \fB\-h\fP, \fB\-\-help\fP
 Print the program help.
@@ -168,19 +168,24 @@ owned by both zones equally.
 .TP
 \fBpregenerate\fP [\fItimestamp\-from\fP] \fItimestamp\-to\fP
 Pre\-generate ZSKs for use with offline KSK, for the specified period starting from now or specified time.
+This function also applies to non\-offline KSK keys.
 .TP
-\fBshow\-offline\fP \fItimestamp\-from\fP [\fItimestamp\-to\fP]
+\fBshow\-offline\fP [\fItimestamp\-from\fP] [\fItimestamp\-to\fP]
 Print pre\-generated offline key\-related records for specified time interval. If \fItimestamp_to\fP
-is omitted, it will be to infinity.
+is omitted, it will be to infinity. If \fItimestamp\-from\fP is omitted, it will start from the
+beginning.
 .TP
 \fBdel\-offline\fP \fItimestamp\-from\fP \fItimestamp\-to\fP
 Delete pre\-generated offline key\-related records in specified time interval.
 .TP
 \fBdel\-all\-old\fP
-Delete old keys that are in state \(aqremoved\(aq.
+Delete old keys that are in state \(aqremoved\(aq. This function also applies to
+non\-offline KSK keys.
 .TP
-\fBgenerate\-ksr\fP \fItimestamp\-from\fP \fItimestamp\-to\fP
-Print to stdout KeySigningRequest based on pre\-generated ZSKs for specified period.
+\fBgenerate\-ksr\fP [\fItimestamp\-from\fP] \fItimestamp\-to\fP
+Print to stdout KeySigningRequest based on pre\-generated ZSKs for specified time period.
+If \fItimestamp\-from\fP is omitted, timestamp of the last offline records set is used
+or now if no records available.
 .TP
 \fBsign\-ksr\fP \fIksr_file\fP
 Read KeySigningRequest from a text file, sign it using local keyset and print SignedKeyResponse to stdout.

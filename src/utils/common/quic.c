@@ -40,7 +40,7 @@ void quic_params_clean(quic_params_t *params)
 	params->enable = false;
 }
 
-#ifdef LIBNGTCP2
+#ifdef ENABLE_QUIC
 
 #include <assert.h>
 #include <poll.h>
@@ -388,14 +388,17 @@ static int quic_recv(quic_ctx_t *ctx, int sockfd)
 	if (nwrite <= 0) {
 		return knot_map_errno();
 	}
+	ngtcp2_pkt_info *pi = &ctx->pi;
 	ctx->pi.ecn = quic_get_ecn(&msg, from.sin6_family);
-	if (ctx->pi.ecn == 0 && errno != 0) {
+	if (errno == ENOENT) {
+		pi = NULL;
+	} else if (errno != 0) {
 		return knot_map_errno();
 	}
 
 	int ret = ngtcp2_conn_read_pkt(ctx->conn,
 	                               ngtcp2_conn_get_path(ctx->conn),
-	                               &ctx->pi, enc_buf, nwrite,
+	                               pi, enc_buf, nwrite,
 	                               quic_timestamp());
 	if (ret != 0) {
 		if (ret == NGTCP2_ERR_DROP_CONN) {
@@ -551,7 +554,7 @@ int quic_ctx_init(quic_ctx_t *ctx, tls_ctx_t *tls_ctx, const quic_params_t *para
 int quic_ctx_connect(quic_ctx_t *ctx, int sockfd, struct addrinfo *dst_addr)
 {
 	if (connect(sockfd, (const struct sockaddr *)(dst_addr->ai_addr),
-	            sizeof(struct sockaddr_storage)) != 0) {
+	            dst_addr->ai_addrlen) != 0) {
 		tls_ctx_deinit(ctx->tls);
 		return knot_map_errno();
 	}
@@ -581,8 +584,8 @@ int quic_ctx_connect(quic_ctx_t *ctx, int sockfd, struct addrinfo *dst_addr)
 	ngtcp2_transport_params_default(&params);
 	params.initial_max_streams_uni = 0;
 	params.initial_max_streams_bidi = 0;
-	params.initial_max_stream_data_bidi_local = MAX_PACKET_SIZE;
-	params.initial_max_data = MAX_PACKET_SIZE;
+	params.initial_max_stream_data_bidi_local = NGTCP2_MAX_VARINT;
+	params.initial_max_data = NGTCP2_MAX_VARINT;
 
 	struct sockaddr_in6 src_addr;
 	socklen_t src_addr_len = sizeof(src_addr);
@@ -631,7 +634,7 @@ int quic_ctx_connect(quic_ctx_t *ctx, int sockfd, struct addrinfo *dst_addr)
 	int timeout = ctx->tls->wait * 1000;
 	while(ctx->state != CONNECTED) {
 		if (quic_timeout(ctx->idle_ts, ctx->tls->wait)) {
-			WARN("QUIC, peer took too long to respond\n");
+			WARN("QUIC, peer took too long to respond");
 			tls_ctx_deinit(ctx->tls);
 			return KNOT_NET_ETIMEOUT;
 		}
@@ -699,7 +702,7 @@ int quic_send_dns_query(quic_ctx_t *ctx, int sockfd, struct addrinfo *srv,
 	int timeout =  ctx->tls->wait * 1000;
 	while (ctx->stream.out_ack == 0) {
 		if (quic_timeout(ctx->idle_ts, ctx->tls->wait)) {
-			WARN("QUIC, failed to send\n");
+			WARN("QUIC, failed to send");
 			set_application_error(ctx, DOQ_REQUEST_CANCELLED,
 			                (uint8_t *)"Connection timeout",
 			                sizeof("Connection timeout") - 1);
@@ -708,7 +711,7 @@ int quic_send_dns_query(quic_ctx_t *ctx, int sockfd, struct addrinfo *srv,
 		int ret = quic_send_data(ctx, sockfd, srv->ai_family, pdatav,
 		                         datavlen);
 		if (ret != KNOT_EOK) {
-			WARN("QUIC, failed to send\n");
+			WARN("QUIC, failed to send");
 			return ret;
 		}
 		pdatav = NULL;
@@ -721,14 +724,14 @@ int quic_send_dns_query(quic_ctx_t *ctx, int sockfd, struct addrinfo *srv,
 		}
 		ret = poll(&pfd, 1, timeout);
 		if (ret < 0) {
-			WARN("QUIC, failed to send\n");
+			WARN("QUIC, failed to send");
 			return knot_map_errno();
 		} else if (ret == 0) {
 			continue;
 		}
 		ret = quic_recv(ctx, sockfd);
 		if (ret != KNOT_EOK) {
-			WARN("QUIC, failed to send\n");
+			WARN("QUIC, failed to send");
 			return ret;
 		}
 		if (ctx->stream.in_parsed_size) {
@@ -770,7 +773,7 @@ int quic_recv_dns_response(quic_ctx_t *ctx, uint8_t *buf, const size_t buf_len,
 		}
 		ret = poll(&pfd, 1, timeout);
 		if (ret < 0) {
-			WARN("QUIC, failed to receive reply (%s)\n",
+			WARN("QUIC, failed to receive reply (%s)",
 			     knot_strerror(errno));
 			return knot_map_errno();
 		} else if (ret == 0) {
@@ -779,14 +782,14 @@ int quic_recv_dns_response(quic_ctx_t *ctx, uint8_t *buf, const size_t buf_len,
 
 		ret = quic_recv(ctx, sockfd);
 		if (ret != KNOT_EOK) {
-			WARN("QUIC, failed to receive reply (%s)\n",
+			WARN("QUIC, failed to receive reply (%s)",
 			     knot_strerror(ret));
 			return ret;
 		}
 		ret = quic_respcpy(ctx, buf, buf_len);
 		if (ret != 0) {
 			if (ret < 0) {
-				WARN("QUIC, failed to receive reply (%s)\n",
+				WARN("QUIC, failed to receive reply (%s)",
 				     knot_strerror(ret));
 			}
 			return ret;
@@ -797,13 +800,13 @@ int quic_recv_dns_response(quic_ctx_t *ctx, uint8_t *buf, const size_t buf_len,
 
 		send: ret = quic_send(ctx, sockfd, srv->ai_family);
 		if (ret != KNOT_EOK) {
-			WARN("QUIC, failed to receive reply (%s)\n",
+			WARN("QUIC, failed to receive reply (%s)",
 			     knot_strerror(ret));
 			return ret;
 		}
 	}
 
-	WARN("QUIC, peer took too long to respond\n");
+	WARN("QUIC, peer took too long to respond");
 	set_application_error(ctx, DOQ_REQUEST_CANCELLED,
 	                (uint8_t *)"Connection timeout",
 	                sizeof("Connection timeout") - 1);
@@ -838,9 +841,9 @@ void quic_ctx_close(quic_ctx_t *ctx)
 
 	msg_iov.iov_len = nwrite;
 
-	struct sockaddr_in6 si;
+	struct sockaddr_in6 si = { 0 };
 	socklen_t si_len = sizeof(si);
-	if (getsockname(ctx->tls->sockfd, &si, &si_len) == 0) {
+	if (getsockname(ctx->tls->sockfd, (struct sockaddr *)&si, &si_len) == 0) {
 		quic_set_enc(ctx->tls->sockfd, si.sin6_family, ctx->pi.ecn);
 	}
 

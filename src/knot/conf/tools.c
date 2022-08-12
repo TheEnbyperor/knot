@@ -25,6 +25,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #ifdef ENABLE_XDP
+#include <netinet/in.h>
 #include <linux/ip.h>
 #include <linux/ipv6.h>
 #include <linux/udp.h>
@@ -40,6 +41,7 @@
 #include "libknot/errcode.h"
 #include "libknot/yparser/yptrafo.h"
 #include "libknot/xdp.h"
+#include "contrib/files.h"
 #include "contrib/sockaddr.h"
 #include "contrib/string.h"
 #include "contrib/wire_ctx.h"
@@ -423,6 +425,26 @@ int check_module_id(
 	return KNOT_EOK;
 }
 
+int check_file(
+	knotd_conf_check_args_t *args)
+{
+	char *path = abs_path((const char *)args->data, CONFIG_DIR);
+
+	struct stat st;
+	int ret = stat(path, &st);
+	free(path);
+
+	if (ret != 0) {
+		args->err_str = "invalid file";
+		return KNOT_EINVAL;
+	} else if(!S_ISREG(st.st_mode)) {
+		args->err_str = "not a file";
+		return KNOT_EINVAL;
+	} else {
+		return KNOT_EOK;
+	}
+}
+
 #define CHECK_LEGACY_NAME(section, old_item, new_item) { \
 	conf_val_t val = conf_get_txn(args->extra->conf, args->extra->txn, \
 	                              section, old_item); \
@@ -498,6 +520,15 @@ static void check_mtu(knotd_conf_check_args_t *args, conf_val_t *xdp_listen)
 int check_server(
 	knotd_conf_check_args_t *args)
 {
+	conf_val_t key_file = conf_get_txn(args->extra->conf, args->extra->txn,
+	                                   C_SRV, C_KEY_FILE);
+	conf_val_t crt_file = conf_get_txn(args->extra->conf, args->extra->txn,
+	                                   C_SRV, C_CERT_FILE);
+	if (key_file.code != crt_file.code) {
+		args->err_str = "both server certificate and key must be set";
+		return KNOT_EINVAL;
+	}
+
 	return KNOT_EOK;
 }
 
@@ -512,9 +543,11 @@ int check_xdp(
 	                              C_UDP);
 	conf_val_t tcp = conf_get_txn(args->extra->conf, args->extra->txn, C_XDP,
 	                              C_TCP);
+	conf_val_t quic = conf_get_txn(args->extra->conf, args->extra->txn, C_XDP,
+	                               C_QUIC);
 	if (xdp_listen.code == KNOT_EOK) {
-		if (!conf_bool(&udp) && !conf_bool(&tcp)) {
-			args->err_str = "XDP processing requires UDP or TCP enabled";
+		if (!conf_bool(&udp) && !conf_bool(&tcp) && !conf_bool(&quic)) {
+			args->err_str = "XDP processing requires UDP, TCP, or QUIC enabled";
 			return KNOT_EINVAL;
 		}
 
@@ -522,6 +555,27 @@ int check_xdp(
 			CONF_LOG(LOG_WARNING, "TCP processing not available");
 		}
 		check_mtu(args, &xdp_listen);
+	}
+
+	if (conf_bool(&quic)) {
+#ifdef ENABLE_QUIC
+		conf_val_t port = conf_get_txn(args->extra->conf, args->extra->txn, C_XDP,
+		                               C_QUIC_PORT);
+		uint16_t quic_port = conf_int(&port);
+
+		while (xdp_listen.code == KNOT_EOK) {
+			conf_xdp_iface_t iface;
+			struct sockaddr_storage udp_addr = conf_addr(&xdp_listen, NULL);
+			if (conf_xdp_iface(&udp_addr, &iface) == KNOT_EOK && iface.port == quic_port) {
+				args->err_str = "QUIC has to listen on different port than UDP";
+				return KNOT_EINVAL;
+			}
+			conf_val_next(&xdp_listen);
+		}
+#else
+		args->err_str = "QUIC processing not available";
+		return KNOT_EINVAL;
+#endif // ENABLE_QUIC
 	}
 
 	return KNOT_EOK;
@@ -534,9 +588,14 @@ int check_keystore(
 	                                        C_BACKEND, args->id, args->id_len);
 	conf_val_t config = conf_rawid_get_txn(args->extra->conf, args->extra->txn, C_KEYSTORE,
 	                                       C_CONFIG, args->id, args->id_len);
-
+	conf_val_t key_label = conf_rawid_get_txn(args->extra->conf, args->extra->txn, C_KEYSTORE,
+	                                          C_KEY_LABEL, args->id, args->id_len);
 	if (conf_opt(&backend) == KEYSTORE_BACKEND_PKCS11 && conf_str(&config) == NULL) {
 		args->err_str = "no PKCS #11 configuration defined";
+		return KNOT_EINVAL;
+	}
+	if (conf_opt(&backend) != KEYSTORE_BACKEND_PKCS11 && conf_bool(&key_label)) {
+		args->err_str = "key labels not supported with the specified keystore";
 		return KNOT_EINVAL;
 	}
 
@@ -569,7 +628,7 @@ int check_policy(
 	conf_val_t dnskey_ttl = conf_rawid_get_txn(args->extra->conf, args->extra->txn, C_POLICY,
 						   C_DNSKEY_TTL, args->id, args->id_len);
 	conf_val_t zone_max_ttl = conf_rawid_get_txn(args->extra->conf, args->extra->txn, C_POLICY,
-						     C_ZONE_MAX_TLL, args->id, args->id_len);
+						     C_ZONE_MAX_TTL, args->id, args->id_len);
 	conf_val_t nsec3 = conf_rawid_get_txn(args->extra->conf, args->extra->txn, C_POLICY,
 	                                      C_NSEC3, args->id, args->id_len);
 	conf_val_t nsec3_iters = conf_rawid_get_txn(args->extra->conf, args->extra->txn, C_POLICY,
@@ -794,6 +853,17 @@ int check_template(
 	} \
 }
 
+#define CHECK_CATZ_TPL(option, option_string) \
+{ \
+	conf_val_t val = conf_rawid_get_txn(args->extra->conf, args->extra->txn, \
+	                                    C_TPL, option, catalog_tpl.data, \
+	                                    catalog_tpl.len); \
+	if (val.code == KNOT_EOK) { \
+		args->err_str = "'" option_string "' in a catalog template"; \
+		return KNOT_EINVAL; \
+	} \
+}
+
 int check_zone(
 	knotd_conf_check_args_t *args)
 {
@@ -831,21 +901,31 @@ int check_zone(
 	                                            C_CATALOG_ZONE, yp_dname(args->id));
 	conf_val_t catalog_serial = conf_zone_get_txn(args->extra->conf, args->extra->txn,
 	                                              C_SERIAL_POLICY, yp_dname(args->id));
-	if ((bool)(conf_opt(&catalog_role) == CATALOG_ROLE_INTERPRET) !=
-	    (bool)(catalog_tpl.code == KNOT_EOK)) {
+
+	unsigned role = conf_opt(&catalog_role);
+	if ((bool)(role == CATALOG_ROLE_INTERPRET) != (bool)(catalog_tpl.code == KNOT_EOK)) {
 		args->err_str = "'catalog-role' must correspond to configured 'catalog-template'";
 		return KNOT_EINVAL;
 	}
-	if ((bool)(conf_opt(&catalog_role) == CATALOG_ROLE_MEMBER) !=
-	    (bool)(catalog_zone.code == KNOT_EOK)) {
+	if ((bool)(role == CATALOG_ROLE_MEMBER) != (bool)(catalog_zone.code == KNOT_EOK)) {
 		args->err_str = "'catalog-role' must correspond to configured 'catalog-zone'";
 		return KNOT_EINVAL;
 	}
-	if (conf_opt(&catalog_role) == CATALOG_ROLE_GENERATE &&
+	if (role == CATALOG_ROLE_GENERATE &&
 	    conf_opt(&catalog_serial) != SERIAL_POLICY_UNIXTIME && // Default doesn't harm.
 	    catalog_serial.code == KNOT_EOK) {
 		args->err_str = "'serial-policy' must be 'unixtime' for generated catalog zones";
 		return KNOT_EINVAL;
+	}
+	if (role == CATALOG_ROLE_INTERPRET) {
+		conf_val(&catalog_tpl);
+		while (catalog_tpl.code == KNOT_EOK) {
+			CHECK_CATZ_TPL(C_CATALOG_TPL,   "catalog-template");
+			CHECK_CATZ_TPL(C_CATALOG_ROLE,  "catalog-role");
+			CHECK_CATZ_TPL(C_CATALOG_ZONE,  "catalog-zone");
+			CHECK_CATZ_TPL(C_CATALOG_GROUP, "catalog-group");
+			conf_val_next(&catalog_tpl);
+		}
 	}
 
 	return KNOT_EOK;

@@ -138,8 +138,12 @@ typedef struct {
 		uint32_t xdp_tcp_idle_close;
 		uint32_t xdp_tcp_idle_reset;
 		uint32_t xdp_tcp_idle_resend;
+		size_t srv_quic_max_clients;
+		size_t srv_quic_obuf_max_size;
+		uint32_t srv_quic_idle_close;
 		bool xdp_udp;
 		bool xdp_tcp;
+		uint16_t xdp_quic;
 		bool xdp_route_check;
 		int ctl_timeout;
 		const uint8_t *srv_nsid_data;
@@ -147,6 +151,7 @@ typedef struct {
 		bool srv_ecs;
 		bool srv_ans_rotate;
 		bool srv_auto_acl;
+		bool srv_proxy_enabled;
 	} cache;
 
 	/*! List of dynamically loaded modules. */

@@ -656,7 +656,8 @@ configured. The configuration for any defined member zone is taken from its
 *group* property value, which should match some catalog-template name.
 If the *group* property is not defined for a member, is empty, or doesn't match
 any of defined catalog-template names, the first catalog-template
-(in the order from configuration) is used.
+(in the order from configuration) is used. Nesting of catalog zones isn't
+supported.
 
 Any de-cataloged member zone is purged immediately, including its
 zone file, journal, timers, and DNSSEC keys. The zone file is not
@@ -675,6 +676,14 @@ to non-default values.
    It's similar to calling `knotc zone-reload` (for all zones).
    The consequence is that new zone files might be discovered and reloaded,
    even for zones that do not relate to updated catalog zone.
+
+   Catalog zones never expire automatically, regardless of what is declared
+   in the catalog zone SOA. However, a catalog zone can be expired manually
+   at any time using `knotc -f zone-purge +expire`.
+
+   Currently, expiration of a catalog zone doesn't have any effect on its
+   member zones. This will likely change in the future depending on the
+   Internet Draft.
 
 .. WARNING::
 

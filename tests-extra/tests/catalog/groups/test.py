@@ -8,13 +8,14 @@ from dnstest.module import ModOnlineSign
 import dnstest.params
 
 import glob
+import os
 import shutil
 from subprocess import DEVNULL, PIPE, Popen
 import subprocess
 import random
 
 def check_keys(server, zone_name, expect_keys):
-    cmd = Popen([dnstest.params.keymgr_bin, "-D", server.dir + "/keys", zone_name, "list", "-v"], \
+    cmd = Popen([dnstest.params.keymgr_bin, "-D", server.dir + "/keys", zone_name, "list", "-e"], \
                 stdout=PIPE, stderr=PIPE, universal_newlines=True)
     (stdout, stderr) = cmd.communicate()
     lines = len(stdout.splitlines())
@@ -32,8 +33,9 @@ t.link(zone, master)
 
 master.cat_interpret(zone)
 
+os.mkdir(master.dir + "/catalog")
 for zf in glob.glob(t.data_dir + "/*.zone"):
-    shutil.copy(zf, master.dir + "/master")
+    shutil.copy(zf, master.dir + "/catalog")
 
 t.start()
 
@@ -84,7 +86,7 @@ up.delete("group.foo.zones.catalog2.", "TXT")
 up.send("NOERROR")
 t.sleep(4)
 # check that DNSSEC no longer works
-with open(master.dir + "/master/cataloged1.zone", "a") as c1zf:
+with open(master.dir + "/catalog/cataloged1.zone", "a") as c1zf:
     c1zf.write("added A 1.2.3.4")
 master.ctl("zone-reload cataloged1.")
 t.sleep(4)

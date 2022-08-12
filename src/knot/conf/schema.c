@@ -220,6 +220,9 @@ static const yp_item_t desc_server[] = {
 	{ C_TCP_MAX_CLIENTS,      YP_TINT,  YP_VINT = { 0, INT32_MAX, YP_NIL } },
 	{ C_TCP_REUSEPORT,        YP_TBOOL, YP_VNONE },
 	{ C_TCP_FASTOPEN,         YP_TBOOL, YP_VNONE },
+	{ C_QUIC_MAX_CLIENTS,     YP_TINT,  YP_VINT = { 128, INT32_MAX, 10000 } },
+	{ C_QUIC_OUTBUF_MAX_SIZE, YP_TINT,  YP_VINT = { MEGA(1), SSIZE_MAX, MEGA(100), YP_SSIZE } },
+	{ C_QUIC_IDLE_CLOSE,      YP_TINT,  YP_VINT = { 1, INT32_MAX, 4, YP_STIME } },
 	{ C_RMT_POOL_LIMIT,       YP_TINT,  YP_VINT = { 0, INT32_MAX, 0 } },
 	{ C_RMT_POOL_TIMEOUT,     YP_TINT,  YP_VINT = { 1, INT32_MAX, 5, YP_STIME } },
 	{ C_RMT_RETRY_DELAY,      YP_TINT,  YP_VINT = { 0, INT32_MAX, 0 } },
@@ -233,9 +236,12 @@ static const yp_item_t desc_server[] = {
 	{ C_UDP_MAX_PAYLOAD_IPV6, YP_TINT,  YP_VINT = { KNOT_EDNS_MIN_DNSSEC_PAYLOAD,
 	                                                KNOT_EDNS_MAX_UDP_PAYLOAD,
 	                                                1232, YP_SSIZE } },
+	{ C_CERT_FILE,            YP_TSTR,  YP_VNONE, YP_FNONE, { check_file } },
+	{ C_KEY_FILE,             YP_TSTR,  YP_VNONE, YP_FNONE, { check_file } },
 	{ C_ECS,                  YP_TBOOL, YP_VNONE },
 	{ C_ANS_ROTATION,         YP_TBOOL, YP_VNONE },
 	{ C_AUTO_ACL,             YP_TBOOL, YP_VNONE },
+	{ C_PROXY_ALLOWLIST,      YP_TNET,  YP_VNONE, YP_FMULTI},
 	{ C_DBUS_EVENT,           YP_TOPT,  YP_VOPT = { dbus_events, DBUS_EVENT_NONE }, YP_FMULTI },
 	{ C_LISTEN,               YP_TADDR, YP_VADDR = { 53 }, YP_FMULTI, { check_listen } },
 	{ C_COMMENT,              YP_TSTR,  YP_VNONE },
@@ -254,6 +260,9 @@ static const yp_item_t desc_xdp[] = {
 	{ C_LISTEN,               YP_TADDR, YP_VADDR = { 53 }, YP_FMULTI, { check_xdp_listen } },
 	{ C_UDP,                  YP_TBOOL, YP_VBOOL = { true } },
 	{ C_TCP,                  YP_TBOOL, YP_VNONE },
+	{ C_QUIC,                 YP_TBOOL, YP_VNONE },
+	{ C_QUIC_PORT,            YP_TINT,  YP_VINT = { 1, 65535, 853 } },
+	{ C_QUIC_LOG,             YP_TBOOL, YP_VNONE },
 	{ C_TCP_MAX_CLIENTS,      YP_TINT,  YP_VINT = { 1024, INT32_MAX, 1000000 } },
 	{ C_TCP_INBUF_MAX_SIZE,   YP_TINT,  YP_VINT = { MEGA(1), SSIZE_MAX, MEGA(100), YP_SSIZE } },
 	{ C_TCP_OUTBUF_MAX_SIZE,  YP_TINT,  YP_VINT = { MEGA(1), SSIZE_MAX, MEGA(100), YP_SSIZE } },
@@ -261,6 +270,7 @@ static const yp_item_t desc_xdp[] = {
 	{ C_TCP_IDLE_RESET,       YP_TINT,  YP_VINT = { 1, INT32_MAX, 20, YP_STIME } },
 	{ C_TCP_RESEND,           YP_TINT,  YP_VINT = { 1, INT32_MAX, 5, YP_STIME } },
 	{ C_ROUTE_CHECK,          YP_TBOOL, YP_VNONE },
+	{ C_COMMENT,              YP_TSTR,  YP_VNONE },
 	{ NULL }
 };
 
@@ -304,15 +314,17 @@ static const yp_item_t desc_database[] = {
 	{ C_CATALOG_DB,          YP_TSTR,  YP_VSTR = { "catalog" } },
 	{ C_CATALOG_DB_MAX_SIZE, YP_TINT,  YP_VINT = { MEGA(5), VIRT_MEM_LIMIT(GIGA(100)),
 	                                               VIRT_MEM_LIMIT(GIGA(20)), YP_SSIZE } },
+	{ C_COMMENT,             YP_TSTR,  YP_VNONE },
 	{ NULL }
 };
 
 static const yp_item_t desc_keystore[] = {
-	{ C_ID,      YP_TSTR, YP_VNONE },
-	{ C_BACKEND, YP_TOPT, YP_VOPT = { keystore_backends, KEYSTORE_BACKEND_PEM },
-	                      CONF_IO_FRLD_ZONES },
-	{ C_CONFIG,  YP_TSTR, YP_VSTR = { "keys" }, CONF_IO_FRLD_ZONES },
-	{ C_COMMENT, YP_TSTR, YP_VNONE },
+	{ C_ID,        YP_TSTR,  YP_VNONE },
+	{ C_BACKEND,   YP_TOPT,  YP_VOPT = { keystore_backends, KEYSTORE_BACKEND_PEM },
+	                         CONF_IO_FRLD_ZONES },
+	{ C_CONFIG,    YP_TSTR,  YP_VSTR = { "keys" }, CONF_IO_FRLD_ZONES },
+	{ C_KEY_LABEL, YP_TBOOL, YP_VNONE },
+	{ C_COMMENT,   YP_TSTR,  YP_VNONE },
 	{ NULL }
 };
 
@@ -387,7 +399,7 @@ static const yp_item_t desc_policy[] = {
 	{ C_KSK_SHARED,          YP_TBOOL, YP_VNONE, CONF_IO_FRLD_ZONES },
 	{ C_DNSKEY_TTL,          YP_TINT,  YP_VINT = { 0, INT32_MAX, YP_NIL, YP_STIME },
 	                                   CONF_IO_FRLD_ZONES },
-	{ C_ZONE_MAX_TLL,        YP_TINT,  YP_VINT = { 0, INT32_MAX, YP_NIL, YP_STIME },
+	{ C_ZONE_MAX_TTL,        YP_TINT,  YP_VINT = { 0, INT32_MAX, YP_NIL, YP_STIME },
 	                                   CONF_IO_FRLD_ZONES },
 	{ C_KSK_LIFETIME,        YP_TINT,  YP_VINT = { 0, UINT32_MAX, 0, YP_STIME },
 	                                   CONF_IO_FRLD_ZONES },
@@ -503,7 +515,7 @@ const yp_item_t conf_schema[] = {
 	{ C_KEYSTORE, YP_TGRP, YP_VGRP = { desc_keystore }, YP_FMULTI, { check_keystore } },
 	{ C_KEY,      YP_TGRP, YP_VGRP = { desc_key }, YP_FMULTI, { check_key } },
 	{ C_RMT,      YP_TGRP, YP_VGRP = { desc_remote }, YP_FMULTI, { check_remote } },
-        { C_RMTS,     YP_TGRP, YP_VGRP = { desc_remotes }, YP_FMULTI, { check_remotes } },
+	{ C_RMTS,     YP_TGRP, YP_VGRP = { desc_remotes }, YP_FMULTI, { check_remotes } },
 	{ C_ACL,      YP_TGRP, YP_VGRP = { desc_acl }, YP_FMULTI, { check_acl } },
 	{ C_SBM,      YP_TGRP, YP_VGRP = { desc_submission }, YP_FMULTI },
 	{ C_POLICY,   YP_TGRP, YP_VGRP = { desc_policy }, YP_FMULTI, { check_policy } },

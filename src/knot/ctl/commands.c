@@ -223,9 +223,24 @@ static int zone_status(zone_t *zone, ctl_args_t *args)
 		return KNOT_EINVAL;
 	}
 
+	char flags[16] = "";
 	knot_ctl_data_t data = {
-		[KNOT_CTL_IDX_ZONE] = name
+		[KNOT_CTL_IDX_ZONE] = name,
+		[KNOT_CTL_IDX_FLAGS] = flags
 	};
+
+	const bool slave = zone_is_slave(conf(), zone);
+	if (slave) {
+		strlcat(flags, CTL_FLAG_STATUS_SLAVE, sizeof(flags));
+	}
+	const bool empty = (zone->contents == NULL);
+	if (empty) {
+		strlcat(flags, CTL_FLAG_STATUS_EMPTY, sizeof(flags));
+	}
+	const bool member = (zone->flags & ZONE_IS_CAT_MEMBER);
+	if (member) {
+		strlcat(flags, CTL_FLAG_STATUS_MEMBER, sizeof(flags));
+	}
 
 	int ret;
 	char buff[128];
@@ -234,7 +249,7 @@ static int zone_status(zone_t *zone, ctl_args_t *args)
 	if (MATCH_OR_FILTER(args, CTL_FILTER_STATUS_ROLE)) {
 		data[KNOT_CTL_IDX_TYPE] = "role";
 
-		if (zone_is_slave(conf(), zone)) {
+		if (slave) {
 			data[KNOT_CTL_IDX_DATA] = "slave";
 		} else {
 			data[KNOT_CTL_IDX_DATA] = "master";
@@ -251,12 +266,12 @@ static int zone_status(zone_t *zone, ctl_args_t *args)
 	if (MATCH_OR_FILTER(args, CTL_FILTER_STATUS_SERIAL)) {
 		data[KNOT_CTL_IDX_TYPE] = "serial";
 
-		if (zone->contents != NULL) {
+		if (empty) {
+			ret = snprintf(buff, sizeof(buff), STATUS_EMPTY);
+		} else {
 			knot_rdataset_t *soa = node_rdataset(zone->contents->apex,
 			                                     KNOT_RRTYPE_SOA);
 			ret = snprintf(buff, sizeof(buff), "%u", knot_soa_serial(soa->rdata));
-		} else {
-			ret = snprintf(buff, sizeof(buff), "none");
 		}
 		if (ret < 0 || ret >= sizeof(buff)) {
 			return KNOT_ESPACE;
@@ -274,7 +289,7 @@ static int zone_status(zone_t *zone, ctl_args_t *args)
 
 	if (MATCH_OR_FILTER(args, CTL_FILTER_STATUS_TRANSACTION)) {
 		data[KNOT_CTL_IDX_TYPE] = "transaction";
-		data[KNOT_CTL_IDX_DATA] = (zone->control_update != NULL) ? "open" : "none";
+		data[KNOT_CTL_IDX_DATA] = (zone->control_update != NULL) ? "open" : STATUS_EMPTY;
 		ret = knot_ctl_send(args->ctl, type, &data);
 		if (ret != KNOT_EOK) {
 			return ret;
@@ -283,7 +298,7 @@ static int zone_status(zone_t *zone, ctl_args_t *args)
 		}
 	}
 
-	bool ufrozen = zone->events.ufrozen;
+	const bool ufrozen = zone->events.ufrozen;
 	if (MATCH_OR_FILTER(args, CTL_FILTER_STATUS_FREEZE)) {
 		data[KNOT_CTL_IDX_TYPE] = "freeze";
 		if (ufrozen) {
@@ -294,7 +309,7 @@ static int zone_status(zone_t *zone, ctl_args_t *args)
 			}
 		} else {
 			if (zone_events_get_time(zone, ZONE_EVENT_UFREEZE) < time(NULL)) {
-				data[KNOT_CTL_IDX_DATA] = "no";
+				data[KNOT_CTL_IDX_DATA] = STATUS_EMPTY;
 			} else {
 				data[KNOT_CTL_IDX_DATA] = "freezing";
 			}
@@ -306,11 +321,11 @@ static int zone_status(zone_t *zone, ctl_args_t *args)
 			type = KNOT_CTL_TYPE_EXTRA;
 		}
 
-		data[KNOT_CTL_IDX_TYPE] = "XFR freeze";
+		data[KNOT_CTL_IDX_TYPE] = "XFR-freeze";
 		if (zone_get_flag(zone, ZONE_XFR_FROZEN, false)) {
 			data[KNOT_CTL_IDX_DATA] = "yes";
 		} else {
-			data[KNOT_CTL_IDX_DATA] = "no";
+			data[KNOT_CTL_IDX_DATA] = STATUS_EMPTY;
 		}
 		ret = knot_ctl_send(args->ctl, type, &data);
 		if (ret != KNOT_EOK) {
@@ -323,7 +338,7 @@ static int zone_status(zone_t *zone, ctl_args_t *args)
 		data[KNOT_CTL_IDX_TYPE] = "catalog";
 		data[KNOT_CTL_IDX_DATA] = buf;
 
-		if (zone->flags & ZONE_IS_CAT_MEMBER) {
+		if (member) {
 			const knot_dname_t *catz;
 			const char *group;
 			void *to_free;
@@ -361,7 +376,7 @@ static int zone_status(zone_t *zone, ctl_args_t *args)
 				}
 				break;
 			default:
-				data[KNOT_CTL_IDX_DATA] = "none";
+				data[KNOT_CTL_IDX_DATA] = STATUS_EMPTY;
 			}
 		}
 
@@ -385,7 +400,7 @@ static int zone_status(zone_t *zone, ctl_args_t *args)
 			if (zone->events.running && zone->events.type == i) {
 				ret = snprintf(buff, sizeof(buff), "running");
 			} else if (ev_time <= 0) {
-				ret = snprintf(buff, sizeof(buff), "not scheduled");
+				ret = snprintf(buff, sizeof(buff), STATUS_EMPTY);
 			} else if (ev_time <= time(NULL)) {
 				bool frozen = ufrozen && ufreeze_applies(i);
 				ret = snprintf(buff, sizeof(buff), frozen ? "frozen" : "pending");
@@ -1039,7 +1054,7 @@ static int zone_txn_get(zone_t *zone, ctl_args_t *args)
 
 static int send_changeset_part(changeset_t *ch, send_ctx_t *ctx, bool from)
 {
-	ctx->data[KNOT_CTL_IDX_FLAGS] = from ? CTL_FLAG_REM : CTL_FLAG_ADD;
+	ctx->data[KNOT_CTL_IDX_FLAGS] = from ? CTL_FLAG_DIFF_REM : CTL_FLAG_DIFF_ADD;
 
 	// Send SOA only if explicitly changed.
 	if (ch->soa_to != NULL) {
@@ -1106,7 +1121,7 @@ static int zone_txn_diff(zone_t *zone, ctl_args_t *args)
 
 	// FULL update has no changeset to print, do a 'get' instead.
 	if (zone->control_update->flags & UPDATE_FULL) {
-		return zone_flag_txn_get(zone, args, CTL_FLAG_ADD);
+		return zone_flag_txn_get(zone, args, CTL_FLAG_DIFF_ADD);
 	}
 
 	send_ctx_t *ctx = &ctl_globals.send_ctx;
@@ -1533,11 +1548,9 @@ static int orphans_purge(ctl_args_t *args)
 
 static int zone_purge(zone_t *zone, ctl_args_t *args)
 {
-	int ret = KNOT_EOK;
-
 	if (MATCH_OR_FILTER(args, CTL_FILTER_PURGE_EXPIRE)) {
 		// Abort possible editing transaction.
-		ret = zone_txn_abort(zone, args);
+		int ret = zone_txn_abort(zone, args);
 		if (ret != KNOT_EOK && ret != KNOT_TXN_ENOTEXISTS) {
 			log_zone_error(zone->name,
 			               "failed to abort pending transaction (%s)",
@@ -1784,7 +1797,7 @@ static int server_status(ctl_args_t *args)
 		return KNOT_EOK;
 	}
 
-	char buff[2048] = "";
+	char buff[4096] = "";
 
 	int ret;
 	if (strcasecmp(type, "version") == 0) {
@@ -1982,8 +1995,8 @@ static int send_block(conf_io_t *io)
 
 	// Get the item prefix.
 	switch (io->type) {
-	case NEW: data[KNOT_CTL_IDX_FLAGS] = CTL_FLAG_ADD; break;
-	case OLD: data[KNOT_CTL_IDX_FLAGS] = CTL_FLAG_REM; break;
+	case NEW: data[KNOT_CTL_IDX_FLAGS] = CTL_FLAG_DIFF_ADD; break;
+	case OLD: data[KNOT_CTL_IDX_FLAGS] = CTL_FLAG_DIFF_REM; break;
 	default: break;
 	}
 

@@ -643,7 +643,7 @@ void conf_free_mod_id(
  * \param[in] txn   Configuration DB transaction.
  * \param[in] zone  Zone name.
  *
- * \return Absolute zonef ile path string pointer.
+ * \return Absolute zone file path string pointer.
  */
 char* conf_zonefile_txn(
 	conf_t *conf,
@@ -680,6 +680,28 @@ static inline char* conf_db(
 	const yp_name_t *db_type)
 {
 	return conf_db_txn(conf, &conf->read_txn, db_type);
+}
+
+/*!
+ * Gets the absolute directory path for a TLS key/cert file.
+ *
+ * \note The result must be explicitly deallocated.
+ *
+ * \param[in] conf     Configuration.
+ * \param[in] txn      Configuration DB transaction.
+ * \param[in] db_type  TLS configuration option.
+ *
+ * \return Absolute path string pointer.
+ */
+char *conf_tls_txn(
+	conf_t *conf,
+	knot_db_txn_t *txn,
+	const yp_name_t *tls_item);
+static inline char* conf_tls(
+	conf_t *conf,
+	const yp_name_t *tls_item)
+{
+	return conf_tls_txn(conf, &conf->read_txn, tls_item);
 }
 
 /*!
@@ -722,9 +744,9 @@ static inline bool conf_get_bool(
  * \param[in] section  Section name.
  * \param[in] param    Parameter name.
  *
- * \return True if enabled, false otherwise.
+ * \return Configured integer value.
  */
-static inline int conf_get_int(
+static inline int64_t conf_get_int(
 	conf_t *conf,
 	const yp_name_t *section,
 	const yp_name_t *param)

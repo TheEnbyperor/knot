@@ -278,7 +278,9 @@ int selective_zone_purge(conf_t *conf, zone_t *zone, purge_flag_t params)
 
 	// Purge the zone timers.
 	if (params & PURGE_ZONE_TIMERS) {
-		memset(&zone->timers, 0, sizeof(zone->timers));
+		zone->timers = (zone_timers_t) {
+			.catalog_member = zone->timers.catalog_member
+		};
 		ret = zone_timers_sweep(&zone->server->timerdb,
 		                        (sweep_cb)knot_dname_cmp, zone->name);
 		RETURN_IF_FAILED("timers", KNOT_ENOENT);
@@ -314,6 +316,7 @@ int selective_zone_purge(conf_t *conf, zone_t *zone, purge_flag_t params)
 
 	// Purge Catalog.
 	if (params & PURGE_ZONE_CATALOG) {
+		zone->timers.catalog_member = 0;
 		ret = catalog_zone_purge(zone->server, conf, zone->name);
 		RETURN_IF_FAILED("catalog", KNOT_EOK);
 	}
@@ -591,6 +594,9 @@ void zone_timers_sanitize(conf_t *conf, zone_t *zone)
 	if (zone_is_slave(conf, zone)) {
 		// assume now if we don't know
 		time_set_default(&zone->timers.next_refresh, now);
+		if (zone->is_catalog_flag) {
+			zone->timers.next_expire = 0;
+		}
 	} else {
 		// invalidate if we don't have a master
 		zone->timers.last_refresh = 0;

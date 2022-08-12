@@ -72,14 +72,18 @@ If enabled, all incoming requests are counted by the network protocol:
 
 * udp4 - UDP over IPv4
 * tcp4 - TCP over IPv4
+* quic4 - QUIC over IPv4
 * udp6 - UDP over IPv6
 * tcp6 - TCP over IPv6
+* quic6 - QUIC over IPv6
 * udp4-xdp - UDP over IPv4 through XDP
 * tcp4-xdp - TCP over IPv4 through XDP
+* quic4-xdp - QUIC over IPv4 through XDP
 * udp6-xdp - UDP over IPv6 through XDP
 * tcp6-xdp - TCP over IPv6 through XDP
+* quic6-xdp - QUIC over IPv6 through XDP
 
-*Default:* on
+*Default:* ``on``
 
 .. _mod-stats_server-operation:
 
@@ -96,7 +100,7 @@ server operation is based on message header OpCode and message query (meta) type
 * ixfr - Incremental zone transfer operation
 * invalid - Invalid server operation
 
-*Default:* on
+*Default:* ``on``
 
 .. _mod-stats_request-bytes:
 
@@ -109,7 +113,7 @@ If enabled, all incoming request bytes are counted by the server operation:
 * update - Dynamic update bytes
 * other - Other request bytes
 
-*Default:* on
+*Default:* ``on``
 
 .. _mod-stats_response-bytes:
 
@@ -125,7 +129,7 @@ If enabled, outgoing response bytes are counted by the server operation:
 .. WARNING::
    Dynamic update response bytes are not counted by this module.
 
-*Default:* on
+*Default:* ``on``
 
 .. _mod-stats_edns-presence:
 
@@ -137,7 +141,7 @@ If enabled, EDNS pseudo section presence is counted by the message direction:
 * request - EDNS present in request
 * response - EDNS present in response
 
-*Default:* off
+*Default:* ``off``
 
 .. _mod-stats_flag-presence:
 
@@ -149,7 +153,7 @@ If enabled, some message header flags are counted:
 * TC - Truncated Answer in response
 * DO - DNSSEC OK in request
 
-*Default:* off
+*Default:* ``off``
 
 .. _mod-stats_response-code:
 
@@ -173,7 +177,7 @@ If enabled, outgoing response code is counted:
 .. WARNING::
    Dynamic update response code is not counted by this module.
 
-*Default:* on
+*Default:* ``on``
 
 .. _mod-stats_request-edns-option:
 
@@ -187,7 +191,7 @@ If enabled, EDNS options in requests are counted by their code:
 * EDNS-KEY-TAG (CODE14)
 * other - All other codes
 
-*Default:* off
+*Default:* ``off``
 
 .. _mod-stats_response-edns-option:
 
@@ -197,7 +201,7 @@ response-edns-option
 If enabled, EDNS options in responses are counted by their code. See
 :ref:`mod-stats_request-edns-option`.
 
-*Default:* off
+*Default:* ``off``
 
 .. _mod-stats_reply-nodata:
 
@@ -211,7 +215,7 @@ query type:
 * AAAA
 * other - All other types
 
-*Default:* off
+*Default:* ``off``
 
 .. _mod-stats_query-type:
 
@@ -235,7 +239,7 @@ If enabled, normal query type is counted:
    Not all assigned meta types (IXFR, AXFR,...) have their own counters,
    because such types are not processed as normal query.
 
-*Default:* off
+*Default:* ``off``
 
 .. _mod-stats_query-size:
 
@@ -251,7 +255,7 @@ in bytes:
 * 272-287
 * 288-65535
 
-*Default:* off
+*Default:* ``off``
 
 .. _mod-stats_reply-size:
 
@@ -267,4 +271,4 @@ in bytes:
 * 4080-4095
 * 4096-65535
 
-*Default:* off
+*Default:* ``off``

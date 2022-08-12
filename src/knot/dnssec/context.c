@@ -22,6 +22,7 @@
 #include "libknot/libknot.h"
 #include "knot/dnssec/context.h"
 #include "knot/dnssec/kasp/keystore.h"
+#include "knot/dnssec/key_records.h"
 #include "knot/server/dthreads.h"
 
 knot_dynarray_define(parent, knot_kasp_parent_t, DYNARRAY_VISIBILITY_NORMAL)
@@ -61,7 +62,7 @@ static void policy_load(knot_kasp_policy_t *policy, conf_t *conf, conf_val_t *id
 	int64_t ttl = conf_int(&val);
 	policy->dnskey_ttl = (ttl != YP_NIL) ? ttl : UINT32_MAX;
 
-	val = conf_id_get(conf, C_POLICY, C_ZONE_MAX_TLL, id);
+	val = conf_id_get(conf, C_POLICY, C_ZONE_MAX_TTL, id);
 	ttl = conf_int(&val);
 	policy->zone_maximal_ttl = (ttl != YP_NIL) ? ttl : UINT32_MAX;
 
@@ -219,7 +220,8 @@ int kdnssec_ctx_init(conf_t *conf, kdnssec_ctx_t *ctx, const knot_dname_t *zone_
 	conf_id_fix_default(&policy_id);
 	policy_load(ctx->policy, conf, &policy_id);
 
-	ret = zone_init_keystore(conf, &policy_id, &ctx->keystore, NULL);
+	ret = zone_init_keystore(conf, &policy_id, &ctx->keystore, NULL,
+	                         &ctx->policy->key_label);
 	if (ret != KNOT_EOK) {
 		goto init_error;
 	}
@@ -227,6 +229,16 @@ int kdnssec_ctx_init(conf_t *conf, kdnssec_ctx_t *ctx, const knot_dname_t *zone_
 	ctx->dbus_event = conf->cache.srv_dbus_event;
 
 	ctx->now = knot_time();
+
+	key_records_init(ctx, &ctx->offline_records);
+	if (ctx->policy->offline_ksk) {
+		ret = kasp_db_load_offline_records(ctx->kasp_db, ctx->zone->dname,
+		                                   &ctx->now, &ctx->offline_next_time,
+		                                   &ctx->offline_records);
+		if (ret != KNOT_EOK && ret != KNOT_ENOENT) {
+			goto init_error;
+		}
+	}
 
 	return KNOT_EOK;
 init_error:
@@ -266,7 +278,7 @@ void kdnssec_ctx_deinit(kdnssec_ctx_t *ctx)
 		}
 		free(ctx->policy);
 	}
-	knot_rrset_free(ctx->offline_rrsig, NULL);
+	key_records_clear(&ctx->offline_records);
 	dnssec_keystore_deinit(ctx->keystore);
 	kasp_zone_free(&ctx->zone);
 	free(ctx->kasp_zone_path);

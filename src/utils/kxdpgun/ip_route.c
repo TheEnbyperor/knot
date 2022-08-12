@@ -1,4 +1,4 @@
-/*  Copyright (C) 2021 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2022 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -261,8 +261,9 @@ int ip_route_get(const struct sockaddr_storage *ip,
 
 		size_t qextra_len;
 		void *qextra = sockaddr_raw(ip, &qextra_len);
-		int ret = netlink_query(ip->ss_family, RTM_GETROUTE, ip_route_get_cb, &ctx,
-		                        qextra, qextra_len, IFA_ADDRESS);
+		int ret = netlink_query(ip->ss_family, RTM_GETROUTE,
+		                        ip_route_get_cb, &ctx, qextra,
+		                        qextra_len, IFA_ADDRESS);
 		if (ret != 0) {
 			return ret;
 		}
@@ -328,7 +329,7 @@ static int ip_neigh_cb(const struct nlmsghdr *nlh, void *data)
 	struct sockaddr_storage dst;
 	attr2addr(ctx->tb[NDA_DST], rm->rtm_family, &dst);
 
-	if (sockaddr_cmp(&dst, ctx->ip, true) == 0 &&
+	if (sockaddr_cmp((struct sockaddr_storage *)&dst, (struct sockaddr_storage *)ctx->ip, true) == 0 &&
 	    ctx->tb[NDA_LLADDR] != NULL) {
 		memcpy(ctx->mac, mnl_attr_get_payload(ctx->tb[NDA_LLADDR]), ETH_ALEN);
 		ctx->match++;
@@ -338,8 +339,7 @@ static int ip_neigh_cb(const struct nlmsghdr *nlh, void *data)
 	return MNL_CB_OK;
 }
 
-int ip_neigh_get(const struct sockaddr_storage *ip,
-                 bool dummy_sendto, uint8_t *mac)
+int ip_neigh_get(const struct sockaddr_storage *ip, bool dummy_sendto, uint8_t *mac)
 {
 	if (dummy_sendto) {
 		int ret = send_dummy_pkt(ip);

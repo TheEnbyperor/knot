@@ -29,9 +29,12 @@ typedef struct {
 	size_t max_conf_size;
 	const char *socket;
 	bool verbose;
+	bool extended;
 	bool force;
 	bool blocking;
 	int timeout;
+	bool color;
+	bool color_force;
 } params_t;
 
 /*!

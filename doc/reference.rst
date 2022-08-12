@@ -142,6 +142,9 @@ General options related to the server.
      tcp-max-clients: INT
      tcp-reuseport: BOOL
      tcp-fastopen: BOOL
+     quic-max-clients: INT
+     quic-outbuf-max-size: SIZE
+     quic-idle-close-timeout: TIME
      remote-pool-limit: INT
      remote-pool-timeout: TIME
      remote-retry-delay: TIME
@@ -149,9 +152,12 @@ General options related to the server.
      udp-max-payload: SIZE
      udp-max-payload-ipv4: SIZE
      udp-max-payload-ipv6: SIZE
+     key-file: STR
+     cert-file: STR
      edns-client-subnet: BOOL
      answer-rotation: BOOL
      automatic-acl: BOOL
+     proxy-allowlist: ADDR[/INT] | ADDR-ADDR ...
      dbus-event: none | running | zone-updated | ksk-submission | dnssec-invalid ...
      listen: ADDR[@INT] ...
 
@@ -214,7 +220,7 @@ are employed if supported.
 
 Change of this parameter requires restart of the Knot server to take effect.
 
-*Default:* root:root
+*Default:* ``root:root``
 
 .. _server_pidfile:
 
@@ -225,7 +231,7 @@ A PID file location.
 
 Change of this parameter requires restart of the Knot server to take effect.
 
-*Default:* :ref:`rundir<server_rundir>`/knot.pid
+*Default:* :ref:`rundir<server_rundir>`\ ``/knot.pid``
 
 .. _server_udp-workers:
 
@@ -271,7 +277,7 @@ async-start
 If enabled, server doesn't wait for the zones to be loaded and starts
 responding immediately with SERVFAIL answers until the zone loads.
 
-*Default:* off
+*Default:* ``off``
 
 .. _server_tcp-idle-timeout:
 
@@ -282,9 +288,9 @@ Maximum idle time (in seconds) between requests on an inbound TCP connection.
 It means if there is no activity on an inbound TCP connection during this limit,
 the connection is closed by the server.
 
-*Minimum:* 1 s
+*Minimum:* ``1``
 
-*Default:* 10 s
+*Default:* ``10``
 
 .. _server_tcp-io-timeout:
 
@@ -297,7 +303,7 @@ incoming DDNS, and **outgoing zone transfers**. The timeout is measured since so
 data is already available for processing.
 Set to 0 for infinity.
 
-*Default:* 500 ms
+*Default:* ``500`` (milliseconds)
 
 .. CAUTION::
    In order to reduce the risk of Slow Loris attacks, it's recommended setting
@@ -315,7 +321,7 @@ DDNS forwarding, and DS check or push. This timeout includes the time needed
 for a network round-trip and for a query processing by the remote.
 Set to 0 for infinity.
 
-*Default:* 5000 ms
+*Default:* ``5000`` (milliseconds)
 
 .. _server_tcp-reuseport:
 
@@ -332,7 +338,7 @@ advisable to use this option on secondary servers.
 
 Change of this parameter requires restart of the Knot server to take effect.
 
-*Default:* off
+*Default:* ``off``
 
 .. _server_tcp-fastopen:
 
@@ -354,7 +360,54 @@ configuration as it's enabled automatically if supported by OS.
      is ``1`` for server side, and ``net.inet.tcp.fastopen.client_enable`` is
      ``1`` for client side.
 
-*Default:* off
+*Default:* ``off``
+
+.. _server_quic-max-clients:
+
+quic-max-clients
+----------------
+
+A maximum number of QUIC clients connected in parallel.
+
+See also :ref:`xdp_quic`.
+
+Change of this parameter requires restart of the Knot server to take effect.
+
+*Minimum:* ``128``
+
+*Default:* ``10000`` (ten thousand)
+
+.. _server_quic-outbuf-max-size:
+
+quic-outbuf-max-size
+--------------------
+
+Maximum cumulative size of memory used for buffers of unACKed
+sent messages.
+
+.. NOTE::
+   Set low if little memory is available (together with :ref:`server_quic-max-clients`
+   since QUIC connections are memory-heavy). Set to high value if outgoing zone
+   transfers of big zone over QUIC are expected.
+
+Change of this parameter requires restart of the Knot server to take effect.
+
+*Minimum:* ``1M`` (1 MiB)
+
+*Default:* ``100M`` (100 MiB)
+
+.. _server_quic-idle-close-timeout:
+
+quic-idle-close-timeout
+-----------------------
+
+Time in seconds, after which any idle QUIC connection is gracefully closed.
+
+Change of this parameter requires restart of the Knot server to take effect.
+
+*Minimum:* ``1``
+
+*Default:* ``4``
 
 .. _server_remote-pool-limit:
 
@@ -367,7 +420,7 @@ TCP connections to the same remote.
 
 Change of this parameter requires restart of the Knot server to take effect.
 
-*Default:* 0
+*Default:* ``0``
 
 .. _server_remote-pool-timeout:
 
@@ -377,7 +430,7 @@ remote-pool-timeout
 The timeout in seconds after which the unused kept-open outgoing TCP connections
 to remote servers are closed.
 
-*Default:* 5
+*Default:* ``5``
 
 .. _server_remote-retry-delay:
 
@@ -388,7 +441,7 @@ When a connection attempt times out to some remote address, this information wil
 kept for this specified time (in milliseconds) and other connections to the same address won't
 be attempted. This prevents repetitive waiting for timeout on an unreachable remote.
 
-*Default:* 0
+*Default:* ``0``
 
 .. _server_socket-affinity:
 
@@ -402,7 +455,7 @@ is lower than the number of UDP or TCP workers.
 
 Change of this parameter requires restart of the Knot server to take effect.
 
-*Default:* off
+*Default:* ``off``
 
 .. _server_tcp-max-clients:
 
@@ -425,7 +478,7 @@ udp-max-payload
 
 Maximum EDNS0 UDP payload size default for both IPv4 and IPv6.
 
-*Default:* 1232
+*Default:* ``1232``
 
 .. _server_udp-max-payload-ipv4:
 
@@ -434,7 +487,7 @@ udp-max-payload-ipv4
 
 Maximum EDNS0 UDP payload size for IPv4.
 
-*Default:* 1232
+*Default:* ``1232``
 
 .. _server_udp-max-payload-ipv6:
 
@@ -443,7 +496,29 @@ udp-max-payload-ipv6
 
 Maximum EDNS0 UDP payload size for IPv6.
 
-*Default:* 1232
+*Default:* ``1232``
+
+.. _server_key-file:
+
+key-file
+--------
+
+Path to a server key PEM file which is used for DNS over QUIC communication.
+
+Change of this parameter requires restart of the Knot server to take effect.
+
+*Default:* one-time in-memory key
+
+.. _server_cert-file:
+
+cert-file
+---------
+
+Path to a server certificate PEM file which is used for DNS over QUIC communication.
+
+Change of this parameter requires restart of the Knot server to take effect.
+
+*Default:* one-time in-memory certificate
 
 .. _server_edns-client-subnet:
 
@@ -454,7 +529,7 @@ Enable or disable EDNS Client Subnet support. If enabled, responses to queries
 containing the EDNS Client Subnet option
 always contain a valid EDNS Client Subnet option according to :rfc:`7871`.
 
-*Default:* off
+*Default:* ``off``
 
 .. _server_answer-rotation:
 
@@ -464,7 +539,7 @@ answer-rotation
 Enable or disable sorted-rrset rotation in the answer section of normal replies.
 The rotation shift is simply determined by a query ID.
 
-*Default:* off
+*Default:* ``off``
 
 .. _server_automatic-acl:
 
@@ -474,7 +549,22 @@ automatic-acl
 If enabled, :ref:`automatic ACL<remote_automatic-acl>` setting of
 configured remotes is considered when evaluating authorized operations.
 
-*Default:* off
+*Default:* ``off``
+
+.. _server_proxy-allowlist:
+
+proxy-allowlist
+---------------
+
+An ordered list of IP addresses, network subnets, or network ranges
+which are allowed as a source address of proxied DNS traffic over UDP.
+The supported proxy protocol is
+`haproxy PROXY v2 <https://www.haproxy.org/download/2.5/doc/proxy-protocol.txt>`_.
+
+.. NOTE::
+   TCP is not supported.
+
+*Default:* not set
 
 .. _server_dbus-event:
 
@@ -501,7 +591,7 @@ Possible values:
 .. NOTE::
    This function requires systemd version at least 221.
 
-*Default:* none
+*Default:* ``none``
 
 .. _server_listen:
 
@@ -532,6 +622,9 @@ Various options related to XDP listening, especially TCP.
      listen: STR[@INT] | ADDR[@INT] ...
      udp: BOOL
      tcp: BOOL
+     quic: BOOL
+     quic-port: INT
+     quic-log: BOOL
      tcp-max-clients: INT
      tcp-inbuf-max-size: SIZE
      tcp-outbuf-max-size: SIZE
@@ -575,7 +668,7 @@ If enabled, DNS over UDP is processed with XDP workers.
 
 Change of this parameter requires restart of the Knot server to take effect.
 
-*Default:* on
+*Default:* ``on``
 
 .. _xdp_tcp:
 
@@ -592,7 +685,41 @@ The TCP stack limitations:
 
 Change of this parameter requires restart of the Knot server to take effect.
 
-*Default:* off
+*Default:* ``off``
+
+.. _xdp_quic:
+
+quic
+----
+
+If enabled, DNS over QUIC is processed with XDP workers.
+
+Change of this parameter requires restart of the Knot server to take effect.
+
+*Default:* ``off``
+
+.. _xdp_quic-port:
+
+quic-port
+---------
+
+DNS over QUIC will listen on the interfaces configured by :ref:`xdp_listen`,
+but on different port, configured by this option.
+
+Change of this parameter requires restart of the Knot server to take effect.
+
+*Default:* ``853``
+
+.. _xdp_quic-log:
+
+quic-log
+--------
+
+Triggers extensive logging of all QUIC protocol internals for every connection.
+
+Change of this parameter requires restart of the Knot server to take effect.
+
+*Default:* ``off``
 
 .. _xdp_tcp-max-clients:
 
@@ -601,9 +728,9 @@ tcp-max-clients
 
 A maximum number of TCP clients connected in parallel.
 
-*Minimum:* 1024
+*Minimum:* ``1024``
 
-*Default:* 1000000 (one million)
+*Default:* ``1000000`` (one million)
 
 .. _xdp_tcp-inbuf-max-size:
 
@@ -613,9 +740,9 @@ tcp-inbuf-max-size
 Maximum cumulative size of memory used for buffers of incompletely
 received messages.
 
-*Minimum:* 1 MiB
+*Minimum:* ``1M`` (1 MiB)
 
-*Default:* 100 MiB
+*Default:* ``100M`` (100 MiB)
 
 .. _xdp_tcp-outbuf-max-size:
 
@@ -625,9 +752,9 @@ tcp-outbuf-max-size
 Maximum cumulative size of memory used for buffers of unACKed
 sent messages.
 
-*Minimum:* 1 MiB
+*Minimum:* ``1M`` (1 MiB)
 
-*Default:* 100 MiB
+*Default:* ``100M`` (100 MiB)
 
 .. _xdp_tcp-idle-close-timeout:
 
@@ -636,9 +763,9 @@ tcp-idle-close-timeout
 
 Time in seconds, after which any idle connection is gracefully closed.
 
-*Minimum:* 1 s
+*Minimum:* ``1``
 
-*Default:* 10 s
+*Default:* ``10``
 
 .. _xdp_tcp-idle-reset-timeout:
 
@@ -647,9 +774,9 @@ tcp-idle-reset-timeout
 
 Time in seconds, after which any idle connection is forcibly closed.
 
-*Minimum:* 1 s
+*Minimum:* ``1``
 
-*Default:* 20 s
+*Default:* ``20``
 
 .. _xdp_tcp-resend-timeout:
 
@@ -659,9 +786,9 @@ tcp-resend-timeout
 Resend outgoing data packets (with DNS response payload) if not ACKed
 before this timeout.
 
-*Minimum:* 1 s
+*Minimum:* ``1``
 
-*Default:* 5 s
+*Default:* ``5``
 
 .. _xdp_route-check:
 
@@ -688,7 +815,7 @@ Change of this parameter requires restart of the Knot server to take effect.
    (``sysctl -w net.ipv4.conf.lo.forwarding=1`` and ``sysctl -w net.ipv6.conf.lo.forwarding=1``).
    If forwarding is disabled, all incoming DNS packets are dropped!
 
-*Default:* off
+*Default:* ``off``
 
 .. _Control section:
 
@@ -710,7 +837,7 @@ listen
 
 A UNIX socket path where the server listens for control commands.
 
-*Default:* :ref:`rundir<server_rundir>`/knot.sock
+*Default:* :ref:`rundir<server_rundir>`\ ``/knot.sock``
 
 .. _control_timeout:
 
@@ -720,7 +847,7 @@ timeout
 Maximum time (in seconds) the control socket operations can take.
 Set to 0 for infinity.
 
-*Default:* 5
+*Default:* ``5``
 
 .. _Logging section:
 
@@ -839,7 +966,7 @@ file
 
 A file path of statistics output in the YAML format.
 
-*Default:* :ref:`rundir<server_rundir>`/stats.yaml
+*Default:* :ref:`rundir<server_rundir>`\ ``/stats.yaml``
 
 .. _statistics_append:
 
@@ -849,7 +976,7 @@ append
 If enabled, the output will be appended to the :ref:`file<statistics_file>`
 instead of file replacement.
 
-*Default:* off
+*Default:* ``off``
 
 .. _Database section:
 
@@ -890,7 +1017,7 @@ An explicit specification of the persistent journal database directory.
 Non-absolute path (i.e. not starting with ``/``) is relative to
 :ref:`storage<database_storage>`.
 
-*Default:* :ref:`storage<database_storage>`/journal
+*Default:* :ref:`storage<database_storage>`\ ``/journal``
 
 .. _database_journal-db-mode:
 
@@ -908,7 +1035,7 @@ Possible values:
   better performance at the expense of lower database durability in the case of
   a crash. This mode is recommended on secondary servers with many zones.
 
-*Default:* robust
+*Default:* ``robust``
 
 .. _database_journal-db-max-size:
 
@@ -929,7 +1056,7 @@ journal usage limits. See more details regarding
 .. NOTE::
    This value also influences server's usage of virtual memory.
 
-*Default:* 20 GiB (512 MiB for 32-bit)
+*Default:* ``20G`` (20 GiB), or ``512M`` (512 MiB) for 32-bit
 
 .. _database_kasp-db:
 
@@ -940,7 +1067,7 @@ An explicit specification of the KASP database directory.
 Non-absolute path (i.e. not starting with ``/``) is relative to
 :ref:`storage<database_storage>`.
 
-*Default:* :ref:`storage<database_storage>`/keys
+*Default:* :ref:`storage<database_storage>`\ ``/keys``
 
 .. _database_kasp-db-max-size:
 
@@ -952,7 +1079,7 @@ The hard limit for the KASP database maximum size.
 .. NOTE::
    This value also influences server's usage of virtual memory.
 
-*Default:* 500 MiB
+*Default:* ``500M`` (500 MiB)
 
 .. _database_timer-db:
 
@@ -963,7 +1090,7 @@ An explicit specification of the persistent timer database directory.
 Non-absolute path (i.e. not starting with ``/``) is relative to
 :ref:`storage<database_storage>`.
 
-*Default:* :ref:`storage<database_storage>`/timers
+*Default:* :ref:`storage<database_storage>`\ ``/timers``
 
 .. _database_timer-db-max-size:
 
@@ -975,7 +1102,7 @@ The hard limit for the timer database maximum size.
 .. NOTE::
    This value also influences server's usage of virtual memory.
 
-*Default:* 100 MiB
+*Default:* ``100M`` (100 MiB)
 
 .. _database_catalog-db:
 
@@ -987,7 +1114,7 @@ Only useful if :ref:`catalog-zones` are enabled.
 Non-absolute path (i.e. not starting with ``/``) is relative to
 :ref:`storage<database_storage>`.
 
-*Default:* :ref:`storage<database_storage>`/catalog
+*Default:* :ref:`storage<database_storage>`\ ``/catalog``
 
 .. _database_catalog-db-max-size:
 
@@ -999,7 +1126,7 @@ The hard limit for the catalog database maximum size.
 .. NOTE::
    This value also influences server's usage of virtual memory.
 
-*Default:* 20 GiB (512 MiB for 32-bit)
+*Default:* ``20G`` (20 GiB), or ``512M`` (512 MiB) for 32-bit
 
 .. _Keystore section:
 
@@ -1014,6 +1141,7 @@ DNSSEC keystore configuration.
    - id: STR
      backend: pem | pkcs11
      config: STR
+     key-label: BOOL
 
 .. _keystore_id:
 
@@ -1035,7 +1163,7 @@ Possible values:
 - ``pem`` – PEM files.
 - ``pkcs11`` – PKCS #11 storage.
 
-*Default:* pem
+*Default:* ``pem``
 
 .. _keystore_config:
 
@@ -1051,7 +1179,17 @@ a configuration string for PKCS #11 storage (`<pkcs11-url> <module-path>`).
 
      "pkcs11:token=knot;pin-value=1234 /usr/lib64/pkcs11/libsofthsm2.so"
 
-*Default:* :ref:`kasp-db<database_kasp-db>`/keys
+*Default:* :ref:`kasp-db<database_kasp-db>`\ ``/keys``
+
+.. _keystore_key-label:
+
+key-label
+---------
+
+If enabled in combination with the PKCS #11 :ref:`keystore_backend`, generated keys
+are labeled in the form ``<zone_name> KSK|ZSK``.
+
+*Default:* ``off``
 
 .. _Key section:
 
@@ -1179,7 +1317,7 @@ block-notify-after-transfer
 When incoming AXFR/IXFR from this remote (as a primary server), suppress
 sending NOTIFY messages to all configured secondary servers.
 
-*Default:* off
+*Default:* ``off``
 
 .. _remote_no-edns:
 
@@ -1190,7 +1328,7 @@ If enabled, no OPT record (EDNS) is inserted to outgoing requests to this
 remote server. This mode is necessary for communication with some broken
 implementations (e.g. Windows Server 2016).
 
-*Default:* off
+*Default:* ``off``
 
 .. _remote_automatic-acl:
 
@@ -1211,7 +1349,7 @@ Automatic ACL rules are evaluated before explicit :ref:`zone ACL <zone_acl>` con
    This functionality requires global activation via
    :ref:`server_automatic-acl` in the server section.
 
-*Default:* on
+*Default:* ``on``
 
 Remotes section
 ===============
@@ -1323,7 +1461,7 @@ Possible values:
 - ``transfer`` – Allow zone transfer (AXFR, IXFR).
 - ``update`` – Allow zone updates (DDNS).
 
-*Default:* query
+*Default:* ``query``
 
 .. _acl_deny:
 
@@ -1334,7 +1472,7 @@ If enabled, instead of allowing, deny the specified :ref:`action<acl_action>`,
 :ref:`address<acl_address>`, :ref:`key<acl_key>`, or combination if these
 items. If no action is specified, deny all actions.
 
-*Default:* off
+*Default:* ``off``
 
 .. _acl_update-type:
 
@@ -1382,7 +1520,7 @@ Possible values:
 - ``sub`` — The owner of each updated RR must be a subdomain of, but MUST NOT
   be equal to at least one domain name set by :ref:`acl_update-owner`.
 
-*Default:* sub-or-equal
+*Default:* ``sub-or-equal``
 
 .. _acl_update-owner-name:
 
@@ -1444,7 +1582,7 @@ check-interval
 Interval for periodic checks of DS presence on parent's DNS servers, in the
 case of the KSK submission.
 
-*Default:* 1 hour
+*Default:* ``1h`` (1 hour)
 
 .. _submission_timeout:
 
@@ -1455,7 +1593,7 @@ After this time period (in seconds) the KSK submission is automatically consider
 successful, even if all the checks were negative or no parents are configured.
 Set to 0 for infinity.
 
-*Default:* 0
+*Default:* ``0``
 
 .. _submission_parent-delay:
 
@@ -1466,7 +1604,7 @@ After successful parent DS check, wait for this period before continuing the nex
 key roll-over step. This delay shall cover the propagation delay of update in the
 parent zone.
 
-*Default:* 0
+*Default:* ``0``
 
 .. _Policy section:
 
@@ -1537,7 +1675,7 @@ manual
 
 If enabled, automatic key management is not used.
 
-*Default:* off
+*Default:* ``off``
 
 .. _policy_single-type-signing:
 
@@ -1547,7 +1685,7 @@ single-type-signing
 If enabled, Single-Type Signing Scheme is used in the automatic key management
 mode.
 
-*Default:* off (:ref:`module onlinesign<mod-onlinesign>` has default on)
+*Default:* ``off`` (:ref:`module onlinesign<mod-onlinesign>` has default ``on``)
 
 .. _policy_algorithm:
 
@@ -1573,7 +1711,7 @@ Possible values:
 
    Ed448 algorithm is only available if compiled with GnuTLS 3.6.12+ and Nettle 3.6+.
 
-*Default:* ecdsap256sha256
+*Default:* ``ecdsap256sha256``
 
 .. _policy_ksk-size:
 
@@ -1583,7 +1721,8 @@ ksk-size
 A length of newly generated :abbr:`KSK (Key Signing Key)` or
 :abbr:`CSK (Combined Signing Key)` keys.
 
-*Default:* 2048 (rsa*), 256 (ecdsap256), 384 (ecdsap384), 256 (ed25519), 456 (ed448)
+*Default:* ``2048`` (rsa*), ``256`` (ecdsap256), ``384`` (ecdsap384), ``256`` (ed25519),
+``456`` (ed448)
 
 .. _policy_zsk-size:
 
@@ -1607,7 +1746,7 @@ More KSKs can be shared during a KSK rollover.
    policy breaks this connection and new shared KSK set is initiated when
    a new KSK is needed.
 
-*Default:* off
+*Default:* ``off``
 
 .. _policy_dnskey-ttl:
 
@@ -1655,7 +1794,7 @@ A period between KSK activation and the next rollover initiation.
 
    This applies for CSK lifetime if single-type-signing is enabled.
 
-*Default:* 0
+*Default:* ``0``
 
 .. _policy_zsk-lifetime:
 
@@ -1673,7 +1812,7 @@ A period between ZSK activation and the next rollover initiation.
 
    Zero (aka infinity) value causes no ZSK rollover as a result.
 
-*Default:* 30 days
+*Default:* ``30d`` (30 days)
 
 .. _policy_delete-delay:
 
@@ -1685,7 +1824,7 @@ keep it in the KASP database for at least this period before deleting it complet
 This might be useful in some troubleshooting cases when resurrection
 is needed.
 
-*Default:* 0
+*Default:* ``0``
 
 .. _policy_propagation-delay:
 
@@ -1699,7 +1838,7 @@ secondary servers.
 .. NOTE::
    Has influence over ZSK key lifetime.
 
-*Default:* 1 hour
+*Default:* ``1h`` (1 hour)
 
 .. _policy_rrsig-lifetime:
 
@@ -1712,7 +1851,7 @@ A validity period of newly issued signatures.
    The RRSIG's signature inception time is set to 90 minutes in the past. This
    time period is not counted to the signature lifetime.
 
-*Default:* 14 days
+*Default:* ``14d`` (14 days)
 
 .. _policy_rrsig-refresh:
 
@@ -1733,7 +1872,7 @@ A period how long at most before a signature refresh time the signature might be
 in order to refresh RRSIGs in bigger batches on a frequently updated zone
 (avoid re-sign event too often).
 
-*Default:* 1 hour
+*Default:* ``1h`` (1 hour)
 
 .. _policy_reproducible-signing:
 
@@ -1745,7 +1884,7 @@ Besides better theoretical cryptographic security, this mode allows significant
 speed-up of loading signed (by the same method) zones. However, the zone signing
 is a bit slower.
 
-*Default:* off
+*Default:* ``off``
 
 .. _policy_nsec3:
 
@@ -1754,7 +1893,7 @@ nsec3
 
 Specifies if NSEC3 will be used instead of NSEC.
 
-*Default:* off
+*Default:* ``off``
 
 .. _policy_nsec3-iterations:
 
@@ -1763,7 +1902,7 @@ nsec3-iterations
 
 A number of additional times the hashing is performed.
 
-*Default:* 0
+*Default:* ``0``
 
 .. _policy_nsec3-opt-out:
 
@@ -1777,7 +1916,7 @@ This speeds up the zone signing and reduces overall zone size.
   NSEC3 with the Opt-Out bit set no longer works as a proof of non-existence
   in this zone.
 
-*Default:* off
+*Default:* ``off``
 
 .. _policy_nsec3-salt-length:
 
@@ -1787,7 +1926,7 @@ nsec3-salt-length
 A length of a salt field in octets, which is appended to the original owner
 name before hashing.
 
-*Default:* 8
+*Default:* ``8``
 
 .. _policy_nsec3-salt-lifetime:
 
@@ -1801,7 +1940,7 @@ Zero value means infinity.
 Special value *-1* triggers re-salt every time when active ZSK changes.
 This optimizes the number of big changes to the zone.
 
-*Default:* 30 days
+*Default:* ``30d`` (30 days)
 
 .. _policy_signing-threads:
 
@@ -1815,7 +1954,7 @@ Those are extra threads independent of :ref:`Background workers<server_backgroun
 .. NOTE::
    Some steps of the DNSSEC signing operation are not parallelized.
 
-*Default:* 1 (no extra threads)
+*Default:* ``1`` (no extra threads)
 
 .. _policy_ksk-submission-check:
 
@@ -1868,7 +2007,11 @@ Possible values:
    If the zone keys are managed manually, the CDS and CDNSKEY rrsets may contain
    more records depending on the keys available.
 
-*Default:* rollover
+.. WARNING::
+   The ``double-ds`` value does not trigger double-DS roll-over method. That method is
+   only suppored by Knot when performed manually, with unset :ref:`policy_ksk-submission-check`.
+
+*Default:* ``rollover``
 
 .. _policy_cds-digest-type:
 
@@ -1877,7 +2020,7 @@ cds-digest-type
 
 Specify digest type for published CDS records.
 
-*Default:* sha256
+*Default:* ``sha256``
 
 .. _policy_dnskey-management:
 
@@ -1905,7 +2048,7 @@ Possible values:
    Otherwise there might remain some DNSKEY records in the zone, belonging to
    deleted keys.
 
-*Default:* full
+*Default:* ``full``
 
 .. _policy_offline-ksk:
 
@@ -1914,7 +2057,7 @@ offline-ksk
 
 Specifies if :ref:`Offline KSK <DNSSEC Offline KSK>` feature is enabled.
 
-*Default:* off
+*Default:* ``off``
 
 .. _policy_unsafe-operation:
 
@@ -1939,7 +2082,7 @@ Multiple values may be specified.
 .. WARNING::
    This mode is intended for DNSSEC experts who understand the corresponding consequences.
 
-*Default:* none
+*Default:* ``none``
 
 .. _Template section:
 
@@ -2036,7 +2179,7 @@ template
 
 A :ref:`reference<template_id>` to a configuration template.
 
-*Default:* not set or *default* (if the template exists)
+*Default:* not set or ``default`` (if the template exists)
 
 .. _zone_storage:
 
@@ -2073,7 +2216,7 @@ It is also possible to use the following formatters:
   Beware of special characters which are escaped or encoded in the \\DDD form
   where DDD is corresponding decimal ASCII code.
 
-*Default:* :ref:`storage<zone_storage>`/``%s``\ .zone
+*Default:* :ref:`storage<zone_storage>`\ ``/%s.zone``
 
 .. _zone_master:
 
@@ -2158,7 +2301,7 @@ Extra checks:
    The soft mode allows the refresh event to ignore a CNAME response to a SOA
    query (malformed message) and triggers a zone bootstrap instead.
 
-*Default:* off
+*Default:* ``off``
 
 .. _zone_zonefile-sync:
 
@@ -2178,7 +2321,7 @@ using the ``-f`` option.
    If you are serving large zones with frequent updates where
    the immediate sync with a zone file is not desirable, increase the value.
 
-*Default:* 0 (immediate)
+*Default:* ``0`` (immediate)
 
 .. _zone_zonefile-load:
 
@@ -2200,7 +2343,7 @@ Possible values:
 When ``difference`` is configured and there are no zone contents yet (cold start
 and no zone contents in the journal), it behaves the same way as ``whole``.
 
-*Default:* whole
+*Default:* ``whole``
 
 .. _zone_journal-content:
 
@@ -2215,7 +2358,7 @@ Possible values:
 - ``changes`` – Zone changes history is stored in journal.
 - ``all`` – Zone contents and history is stored in journal.
 
-*Default:* changes
+*Default:* ``changes``
 
 .. _zone_journal-max-usage:
 
@@ -2228,7 +2371,7 @@ Policy how much space in journal DB will the zone's journal occupy.
    Journal DB may grow far above the sum of journal-max-usage across
    all zones, because of DB free space fragmentation.
 
-*Default:* 100 MiB
+*Default:* ``100M`` (100 MiB)
 
 .. _zone_journal-max-depth:
 
@@ -2240,9 +2383,9 @@ Maximum history length of the journal.
 .. NOTE::
    Zone-in-journal changeset isn't counted to the limit.
 
-*Minimum:* 2
+*Minimum:* ``2``
 
-*Default:* 20
+*Default:* ``20``
 
 .. _zone_zone-max-size:
 
@@ -2257,18 +2400,18 @@ For incremental transfers (IXFR), the effective limit for the total size of
 the records in the transfer is twice the configured value. However the final
 size of the zone must satisfy the configured value.
 
-*Default:* 2^64
+*Default:* unlimited
 
 .. _zone_adjust-threads:
 
 adjust-threads
 --------------
 
-Parallelize internal zone adjusting procedures. This is useful with huge
-zones with NSEC3. Speedup observable at server startup and while processing
-NSEC3 re-salt.
+Parallelize internal zone adjusting procedures by using specified number of
+threads. This is useful with huge zones with NSEC3. Speedup observable at
+server startup and while processing NSEC3 re-salt.
 
-*Default:* 1
+*Default:* ``1`` (no extra threads)
 
 .. _zone_dnssec-signing:
 
@@ -2277,7 +2420,7 @@ dnssec-signing
 
 If enabled, automatic DNSSEC signing for the zone is turned on.
 
-*Default:* off
+*Default:* ``off``
 
 .. _zone_dnssec-validation:
 
@@ -2301,6 +2444,8 @@ List of DNSSEC checks:
 The validation is not affected by :ref:`zone_dnssec-policy` configuration,
 except for :ref:`policy_signing-threads` option, which specifies the number
 of threads for parallel validation.
+
+*Default:* not set
 
 .. NOTE::
 
@@ -2330,7 +2475,7 @@ On each zone load/update, verify that ZONEMD is present in the zone and valid.
 .. NOTE::
    Zone digest calculation may take much time and CPU on large zones.
 
-*Default:* off
+*Default:* ``off``
 
 .. _zone_zonemd-generate:
 
@@ -2346,7 +2491,7 @@ Possible values:
 - ``zonemd-sha512`` – Generate ZONEMD using SHA512 algorithm.
 - ``remove`` – Remove any ZONEMD from the zone apex.
 
-*Default:* none
+*Default:* ``none``
 
 .. _zone_serial-policy:
 
@@ -2375,7 +2520,7 @@ Possible values:
 
    Generated catalog zones use ``unixtime`` only.
 
-*Default:* increment (unixtime for generated catalog zones)
+*Default:* ``increment`` (``unixtime`` for generated catalog zones)
 
 .. _zone_refresh-min-interval:
 
@@ -2384,7 +2529,9 @@ refresh-min-interval
 
 Forced minimum zone refresh interval (in seconds) to avoid flooding primary server.
 
-*Default:* 2 (minimum allowed)
+*Minimum:* ``2``
+
+*Default:* ``2``
 
 .. _zone_refresh-max-interval:
 
@@ -2402,7 +2549,9 @@ retry-min-interval
 
 Forced minimum zone retry interval (in seconds) to avoid flooding primary server.
 
-*Default:* 1 (minimum allowed)
+*Minimum:* ``1``
+
+*Default:* ``1``
 
 .. _zone_retry-max-interval:
 
@@ -2420,7 +2569,9 @@ expire-min-interval
 
 Forced minimum zone expire interval (in seconds) to avoid flooding primary server.
 
-*Default:* 3 (minimum allowed)
+*Minimum:* ``3``
+
+*Default:* ``3``
 
 .. _zone_expire-max-interval:
 
@@ -2445,7 +2596,7 @@ Trigger zone catalog feature. Possible values:
   assigned member zones.
 - ``member`` – A member zone that is assigned to one generated catalog zone.
 
-*Default:* none
+*Default:* ``none``
 
 .. _zone_catalog-template:
 
@@ -2459,6 +2610,10 @@ has the *group* property defined, matching another catalog template.
 
 .. NOTE::
    This option must be set if and only if :ref:`zone_catalog-role` is *interpret*.
+
+   Nested catalog zones aren't supported. Therefore catalog templates can't use
+   :ref:`zone_catalog-template`, :ref:`zone_catalog-role`, :ref:`zone_catalog-zone`,
+   and :ref:`zone_catalog-group` options.
 
 *Default:* not set
 

@@ -16,8 +16,8 @@ AC_CANONICAL_HOST
 
 # Update library versions
 # https://www.gnu.org/software/libtool/manual/html_node/Updating-version-info.html
-KNOT_LIB_VERSION([libknot],    12, 0, 0)
-KNOT_LIB_VERSION([libdnssec],   8, 0, 0)
+KNOT_LIB_VERSION([libknot],    13, 0, 0)
+KNOT_LIB_VERSION([libdnssec],   9, 0, 0)
 KNOT_LIB_VERSION([libzscanner], 4, 0, 0)
 
 AC_SUBST([KNOT_VERSION_MAJOR], knot_VERSION_MAJOR)
@@ -558,30 +558,31 @@ AS_IF([test "$enable_daemon" = "yes" -o "$enable_utilities" = "yes"], [
 
 # QUIC support
 AC_ARG_ENABLE([quic],
-   AS_HELP_STRING([--enable-quic=auto|yes|no], [Support DoQ (needs libngtcp2 == 0.6.0, gnutls >= 3.7.2) [default=auto]]),
+   AS_HELP_STRING([--enable-quic=auto|yes|no], [Support DoQ (needs libngtcp2 = 0.7.0, gnutls >= 3.7.2) [default=auto]]),
    [], [enable_quic=auto])
 
 AS_CASE([$enable_quic],
-   [auto], [PKG_CHECK_MODULES([libngtcp2], [libngtcp2 == 0.6.0 libngtcp2_crypto_gnutls], [enable_quic=yes], [enable_quic=no])],
-   [yes], [PKG_CHECK_MODULES([libngtcp2], [libngtcp2 == 0.6.0 libngtcp2_crypto_gnutls], [enable_quic=yes],
+   [auto], [PKG_CHECK_MODULES([libngtcp2], [libngtcp2 = 0.7.0 libngtcp2_crypto_gnutls], [enable_quic=yes], [enable_quic=no])],
+   [yes], [PKG_CHECK_MODULES([libngtcp2], [libngtcp2 = 0.7.0 libngtcp2_crypto_gnutls], [enable_quic=yes],
              AS_IF([test "$gnutls_quic" = "yes"],
                 [enable_quic=embedded
                  embedded_libngtcp2_CFLAGS="-I\$(top_srcdir)/src/contrib/libngtcp2 -I\$(top_srcdir)/src/contrib/libngtcp2/ngtcp2/lib"
                  embedded_libngtcp2_LIBS=$libelf_LIBS
                  libngtcp2_CFLAGS="-I\$(top_srcdir)/src/contrib/libngtcp2"],
                 [enable_quic=no
-                 AC_MSG_WARN([gnutls >= 3.7.2 is required])]))],
+                 AC_MSG_WARN([gnutls >= 3.7.2 is required for QUIC])]))],
    [no], [],
    [*], [AC_MSG_ERROR([Invalid value of --enable-quic.])]
 )
 AM_CONDITIONAL([EMBEDDED_LIBNGTCP2], [test "$enable_quic" = "embedded"])
+AM_CONDITIONAL([ENABLE_QUIC], [test "$enable_quic" != "no"])
 AC_SUBST([embedded_libngtcp2_CFLAGS])
 AC_SUBST([embedded_libngtcp2_LIBS])
 AC_SUBST([libngtcp2_CFLAGS])
 AC_SUBST([libngtcp2_LIBS])
 
 AS_IF([test "$enable_quic" != "no"], [
-  AC_DEFINE([LIBNGTCP2], [1], [Define to 1 to enable DoQ support using libngtcp2 and GnuTLS])])
+  AC_DEFINE([ENABLE_QUIC], [1], [Define to 1 to enable DoQ support using libngtcp2 and GnuTLS])])
 
 ############################################
 # Dependencies needed for Knot DNS utilities

@@ -66,8 +66,17 @@ parameter set on the server side in server\(aqs Control configuration section.
 Zone event trigger commands wait until the event is finished. Control timeout
 is set to infinity if not forced by explicit timeout specification.
 .TP
+\fB\-e\fP, \fB\-\-extended\fP
+Show extended output (even empty items in zone status).
+.TP
 \fB\-f\fP, \fB\-\-force\fP
 Forced operation. Overrides some checks.
+.TP
+\fB\-x\fP, \fB\-\-mono\fP
+Don\(aqt generate colorized output.
+.TP
+\fB\-X\fP, \fB\-\-color\fP
+Force colorized output in extended output or to a pipe.
 .TP
 \fB\-v\fP, \fB\-\-verbose\fP
 Enable debug output.
@@ -104,7 +113,15 @@ when semantic check warning appears. (*)
 .TP
 \fBzone\-status\fP [\fIzone\fP\&...] [\fIfilter\fP]
 Show the zone status. Filters are \fB+role\fP, \fB+serial\fP, \fB+transaction\fP,
-\fB+events\fP, \fB+freeze\fP, and \fB+catalog\fP\&.
+\fB+events\fP, \fB+freeze\fP, and \fB+catalog\fP\&. Empty zone parameters are omitted,
+unless the \fB\-\-extended\fP option is used. A single dash in the output represents
+an unset value. Automatic colorization can be overruled using the \fB\-\-mono\fP and
+\fB\-\-color\fP options.
+.sp
+The color code is:
+\fIgreen\fP \- zone acts as a master / \fIred\fP \- zone acts as a slave,
+\fIbold font (highlited)\fP \- zone is active / \fInormal\fP \- zone is empty,
+\fIunderscored\fP \- zone is an interpreted catalog member.
 .TP
 \fBzone\-reload\fP [\fIzone\fP\&...]
 Trigger a zone reload from a disk without checking its modification time. For

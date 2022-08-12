@@ -1,4 +1,4 @@
-/*  Copyright (C) 2021 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2022 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -37,6 +37,7 @@
 #include "knot/common/fdset.h"
 #include "knot/nameserver/process_query.h"
 #include "knot/query/layer.h"
+#include "knot/server/proxyv2.h"
 #include "knot/server/server.h"
 #include "knot/server/udp-handler.h"
 #include "knot/server/xdp-handler.h"
@@ -65,14 +66,14 @@ static void udp_handle(udp_context_t *udp, int fd, struct sockaddr_storage *ss,
 {
 	/* Create query processing parameter. */
 	knotd_qdata_params_t params = {
+		.proto = KNOTD_QUERY_PROTO_UDP,
 		.remote = ss,
-		.flags = KNOTD_QUERY_FLAG_NO_AXFR | KNOTD_QUERY_FLAG_NO_IXFR | /* No transfers. */
-		         KNOTD_QUERY_FLAG_LIMIT_SIZE, /* Enforce UDP packet size limit. */
 		.socket = fd,
 		.server = udp->server,
 		.xdp_msg = xdp_msg,
 		.thread_id = udp->thread_id
 	};
+	struct sockaddr_storage proxied_remote;
 
 	/* Start query processing. */
 	knot_layer_begin(&udp->layer, &params);
@@ -83,8 +84,13 @@ static void udp_handle(udp_context_t *udp, int fd, struct sockaddr_storage *ss,
 
 	/* Input packet. */
 	int ret = knot_pkt_parse(query, 0);
-	if (ret != KNOT_EOK && query->parsed > 0) { // parsing failed (e.g. 2x OPT)
-		query->parsed--; // artificially decreasing "parsed" leads to FORMERR
+	if (ret != KNOT_EOK && query->parsed > 0) {
+		ret = proxyv2_header_strip(&query, params.remote, &proxied_remote);
+		if (ret == KNOT_EOK) {
+			params.remote = &proxied_remote;
+		} else {
+			query->parsed--; // artificially decreasing "parsed" leads to FORMERR
+		}
 	}
 	knot_layer_consume(&udp->layer, query);
 
@@ -108,7 +114,7 @@ static void udp_handle(udp_context_t *udp, int fd, struct sockaddr_storage *ss,
 }
 
 typedef struct {
-	void* (*udp_init)(void *);
+	void* (*udp_init)(udp_context_t *, void *);
 	void (*udp_deinit)(void *);
 	int (*udp_recv)(int, void *);
 	void (*udp_handle)(udp_context_t *, void *);
@@ -160,7 +166,7 @@ struct udp_recvfrom {
 	cmsg_pktinfo_t pktinfo;
 };
 
-static void *udp_recvfrom_init(_unused_ void *xdp_sock)
+static void *udp_recvfrom_init(_unused_ udp_context_t *ctx, _unused_ void *xdp_sock)
 {
 	struct udp_recvfrom *rq = malloc(sizeof(struct udp_recvfrom));
 	if (rq == NULL) {
@@ -249,7 +255,7 @@ struct udp_recvmmsg {
 	cmsg_pktinfo_t pktinfo[RECVMMSG_BATCHLEN];
 };
 
-static void *udp_recvmmsg_init(_unused_ void *xdp_sock)
+static void *udp_recvmmsg_init(_unused_ udp_context_t *ctx, _unused_ void *xdp_sock)
 {
 	knot_mm_t mm;
 	mm_ctx_mempool(&mm, sizeof(struct udp_recvmmsg));
@@ -350,14 +356,16 @@ static udp_api_t udp_recvmmsg_api = {
 
 #ifdef ENABLE_XDP
 
-static void *xdp_recvmmsg_init(void *xdp_sock)
+static void *xdp_recvmmsg_init(udp_context_t *ctx, void *xdp_sock)
 {
-	return xdp_handle_init(xdp_sock);
+	return xdp_handle_init(ctx->server, xdp_sock);
 }
 
 static void xdp_recvmmsg_deinit(void *d)
 {
-	xdp_handle_free(d);
+	if (d != NULL) {
+		xdp_handle_free(d);
+	}
 }
 
 static int xdp_recvmmsg_recv(_unused_ int fd, void *d)
@@ -515,7 +523,7 @@ int udp_master(dthread_t *thread)
 	}
 
 	/* Initialize the networking API. */
-	api_ctx = api->udp_init(xdp_socket);
+	api_ctx = api->udp_init(&udp, xdp_socket);
 	if (api_ctx == NULL) {
 		goto finish;
 	}

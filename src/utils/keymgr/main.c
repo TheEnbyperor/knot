@@ -43,11 +43,11 @@ static void print_help(void)
 	       "                            (default %s)\n"
 	       "  -D, --dir <path>         Path to a KASP database directory, use default configuration.\n"
 	       "  -t, --tsig <name> [alg]  Generate a TSIG key.\n"
+	       "  -e, --extended           Extended output (listing of keys with full description).\n"
 	       "  -j, --json               Print the zones or keys in JSON format.\n"
 	       "  -l, --list               List all zones that have at least one key in KASP database.\n"
 	       "  -x, --mono               Don't color the output.\n"
 	       "  -X, --color              Force output colorization in the normal mode.\n"
-	       "  -v, --verbose            Listing of keys with full description.\n"
 	       "  -h, --help               Print the program help.\n"
 	       "  -V, --version            Print the program version.\n"
 	       "\n"
@@ -88,12 +88,12 @@ static void print_help(void)
 	       "  pregenerate   Pre-generate ZSKs for later rollovers with offline KSK.\n"
 	       "                 (syntax: pregenerate [<from>] <to>)\n"
 	       "  show-offline  Print pre-generated offline key-related records for specified time interval (possibly to infinity).\n"
-	       "                 (syntax: show-offline <from> [<to>])\n"
+	       "                 (syntax: show-offline [<from>] [<to>])\n"
 	       "  del-offline   Delete pre-generated offline key-related records in specified time interval.\n"
 	       "                 (syntax: del-offline <from> <to>)\n"
 	       "  del-all-old   Delete old keys that are in state 'removed'.\n"
 	       "  generate-ksr  Print to stdout KeySigningRequest based on pre-generated ZSKS.\n"
-	       "                 (syntax: generate-ksr <from> <to>)\n"
+	       "                 (syntax: generate-ksr [<from>] <to>)\n"
 	       "  sign-ksr      Read KeySigningRequest from a file, sign it and print SignedKeyResponse to stdout.\n"
 	       "                 (syntax: sign-ksr <ksr_file>)\n"
 	       "  validate-skr  Validate RRSIGs in a SignedKeyResponse (if not corrupt).\n"
@@ -119,7 +119,7 @@ static int key_command(int argc, char *argv[], int opt_ind, knot_lmdb_db_t *kasp
                        keymgr_list_params_t *list_params)
 {
 	if (argc < opt_ind + 2) {
-		ERR2("zone name or command not specified\n");
+		ERR2("zone name or command not specified");
 		print_help();
 		return KNOT_EINVAL;
 	}
@@ -136,20 +136,20 @@ static int key_command(int argc, char *argv[], int opt_ind, knot_lmdb_db_t *kasp
 
 	int ret = kdnssec_ctx_init(conf(), &kctx, zone_name, kaspdb, NULL);
 	if (ret != KNOT_EOK) {
-		ERR2("failed to initialize KASP (%s)\n", knot_strerror(ret));
+		ERR2("failed to initialize KASP (%s)", knot_strerror(ret));
 		goto main_end;
 	}
 
 #define CHECK_MISSING_ARG(msg) \
 	if (argc < 3) { \
-		ERR2("%s\n", (msg)); \
+		ERR2("%s", (msg)); \
 		ret = KNOT_EINVAL; \
 		goto main_end; \
 	}
 
 #define CHECK_MISSING_ARG2(msg) \
 	if (argc < 4) { \
-		ERR2("%s\n", (msg)); \
+		ERR2("%s", (msg)); \
 		ret = KNOT_EINVAL; \
 		goto main_end; \
 	}
@@ -257,8 +257,8 @@ static int key_command(int argc, char *argv[], int opt_ind, knot_lmdb_db_t *kasp
 		ret = keymgr_pregenerate_zsks(&kctx, argc > 3 ? argv[2] : NULL,
 		                                     argc > 3 ? argv[3] : argv[2]);
 	} else if (strcmp(argv[1], "show-offline") == 0) {
-		CHECK_MISSING_ARG("Timestamp from not specified");
-		ret = keymgr_print_offline_records(&kctx, argv[2], argc > 3 ? argv[3] : NULL);
+		ret = keymgr_print_offline_records(&kctx, argc > 2 ? argv[2] : NULL,
+		                                          argc > 3 ? argv[3] : NULL);
 		print_ok_on_succes = false;
 	} else if (strcmp(argv[1], "del-offline") == 0) {
 		CHECK_MISSING_ARG2("Timestamps from-to not specified");
@@ -266,8 +266,9 @@ static int key_command(int argc, char *argv[], int opt_ind, knot_lmdb_db_t *kasp
 	} else if (strcmp(argv[1], "del-all-old") == 0) {
 		ret = keymgr_del_all_old(&kctx);
 	} else if (strcmp(argv[1], "generate-ksr") == 0) {
-		CHECK_MISSING_ARG2("Timestamps from-to not specified");
-		ret = keymgr_print_ksr(&kctx, argv[2], argv[3]);
+		CHECK_MISSING_ARG("Timestamps to not specified");
+		ret = keymgr_print_ksr(&kctx, argc > 3 ? argv[2] : NULL,
+		                              argc > 3 ? argv[3] : argv[2]);
 		print_ok_on_succes = false;
 	} else if (strcmp(argv[1], "sign-ksr") == 0) {
 		CHECK_MISSING_ARG("Input file not specified");
@@ -280,7 +281,7 @@ static int key_command(int argc, char *argv[], int opt_ind, knot_lmdb_db_t *kasp
 		CHECK_MISSING_ARG("Input file not specified");
 		ret = keymgr_import_skr(&kctx, argv[2]);
 	} else {
-		ERR2("invalid command '%s'\n", argv[1]);
+		ERR2("invalid command '%s'", argv[1]);
 		goto main_end;
 	}
 
@@ -289,7 +290,7 @@ static int key_command(int argc, char *argv[], int opt_ind, knot_lmdb_db_t *kasp
 	if (ret == KNOT_EOK) {
 		printf("%s", print_ok_on_succes ? "OK\n" : "");
 	} else {
-		ERR2("%s\n", knot_strerror(ret));
+		ERR2("%s", knot_strerror(ret));
 	}
 
 main_end:
@@ -302,18 +303,18 @@ main_end:
 int main(int argc, char *argv[])
 {
 	struct option opts[] = {
-		{ "config",  required_argument, NULL, 'c' },
-		{ "confdb",  required_argument, NULL, 'C' },
-		{ "dir",     required_argument, NULL, 'D' },
-		{ "tsig",    required_argument, NULL, 't' },
-		{ "list",    no_argument,       NULL, 'l' },
-		{ "brief",   no_argument,       NULL, 'b' }, // Legacy.
-		{ "mono",    no_argument,       NULL, 'x' },
-		{ "color",   no_argument,       NULL, 'X' },
-		{ "verbose", no_argument,       NULL, 'v' },
-		{ "help",    no_argument,       NULL, 'h' },
-		{ "version", no_argument,       NULL, 'V' },
-		{ "json",    no_argument,       NULL, 'j' },
+		{ "config",   required_argument, NULL, 'c' },
+		{ "confdb",   required_argument, NULL, 'C' },
+		{ "dir",      required_argument, NULL, 'D' },
+		{ "tsig",     required_argument, NULL, 't' },
+		{ "extended", no_argument,       NULL, 'e' },
+		{ "list",     no_argument,       NULL, 'l' },
+		{ "brief",    no_argument,       NULL, 'b' }, // Legacy.
+		{ "mono",     no_argument,       NULL, 'x' },
+		{ "color",    no_argument,       NULL, 'X' },
+		{ "help",     no_argument,       NULL, 'h' },
+		{ "version",  no_argument,       NULL, 'V' },
+		{ "json",     no_argument,       NULL, 'j' },
 		{ NULL }
 	};
 
@@ -326,7 +327,7 @@ int main(int argc, char *argv[])
 	list_params.color = isatty(STDOUT_FILENO);
 
 	int opt = 0, parm = 0;
-	while ((opt = getopt_long(argc, argv, "c:C:D:t:jlbxXvhV", opts, NULL)) != -1) {
+	while ((opt = getopt_long(argc, argv, "c:C:D:t:ejlbxXhV", opts, NULL)) != -1) {
 		switch (opt) {
 		case 'c':
 			if (util_conf_init_file(optarg) != KNOT_EOK) {
@@ -349,10 +350,13 @@ int main(int argc, char *argv[])
 			}
 			ret = keymgr_generate_tsig(optarg, (argc > optind ? argv[optind] : "hmac-sha256"), parm);
 			if (ret != KNOT_EOK) {
-				ERR2("failed to generate TSIG (%s)\n", knot_strerror(ret));
+				ERR2("failed to generate TSIG (%s)", knot_strerror(ret));
 				goto failure;
 			}
 			goto success;
+		case 'e':
+			list_params.extended = true;
+			break;
 		case 'j':
 			list_params.json = true;
 			break;
@@ -360,16 +364,13 @@ int main(int argc, char *argv[])
 			just_list = true;
 			break;
 		case 'b':
-			WARN2("option '--brief' is deprecated and enabled by default\n");
+			WARN2("option '--brief' is deprecated and enabled by default");
 			break;
 		case 'x':
 			list_params.color = false;
 			break;
 		case 'X':
 			list_params.color = true;
-			break;
-		case 'v':
-			list_params.verbose = true;
 			break;
 		case 'h':
 			print_help();

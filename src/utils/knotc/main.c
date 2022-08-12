@@ -1,4 +1,4 @@
-/*  Copyright (C) 2021 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2022 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -16,6 +16,7 @@
 
 #include <getopt.h>
 #include <stdio.h>
+#include <unistd.h>
 
 #include "contrib/strtonum.h"
 #include "knot/common/log.h"
@@ -43,7 +44,10 @@ static void print_help(void)
 	       " -t, --timeout <sec>      "SPACE"Use a control socket timeout (max 86400 seconds).\n"
 	       "                          "SPACE" (default %u seconds)\n"
 	       " -b, --blocking	          "SPACE"Zone event trigger commands wait until the event is finished.\n"
+	       " -e, --extended           "SPACE"Show extended output.\n"
 	       " -f, --force              "SPACE"Forced operation. Overrides some checks.\n"
+	       " -x, --mono               "SPACE"Don't color the output.\n"
+	       " -X, --color              "SPACE"Force output colorization.\n"
 	       " -v, --verbose            "SPACE"Enable debug output.\n"
 	       " -h, --help               "SPACE"Print the program help.\n"
 	       " -V, --version            "SPACE"Print the program version.\n",
@@ -68,7 +72,10 @@ int main(int argc, char **argv)
 		{ "socket",        required_argument, NULL, 's' },
 		{ "timeout",       required_argument, NULL, 't' },
 		{ "blocking",      no_argument,       NULL, 'b' },
+		{ "extended",      no_argument,       NULL, 'e' },
 		{ "force",         no_argument,       NULL, 'f' },
+		{ "mono",          no_argument,       NULL, 'x' },
+		{ "color",         no_argument,       NULL, 'X' },
 		{ "verbose",       no_argument,       NULL, 'v' },
 		{ "help",          no_argument,       NULL, 'h' },
 		{ "version",       no_argument,       NULL, 'V' },
@@ -78,9 +85,12 @@ int main(int argc, char **argv)
 	/* Set the time zone. */
 	tzset();
 
+	params.color = isatty(STDOUT_FILENO);
+	params.color_force = false;
+
 	/* Parse command line arguments */
 	int opt = 0;
-	while ((opt = getopt_long(argc, argv, "+c:C:m:s:t:bfvhV", opts, NULL)) != -1) {
+	while ((opt = getopt_long(argc, argv, "+c:C:m:s:t:befxXvhV", opts, NULL)) != -1) {
 		switch (opt) {
 		case 'c':
 			params.orig_config = optarg;
@@ -110,11 +120,21 @@ int main(int argc, char **argv)
 		case 'b':
 			params.blocking = true;
 			break;
+		case 'e':
+			params.extended = true;
+			break;
 		case 'f':
 			params.force = true;
 			break;
 		case 'v':
 			params.verbose = true;
+			break;
+		case 'x':
+			params.color = false;
+			break;
+		case 'X':
+			params.color = true;
+			params.color_force = true;
 			break;
 		case 'h':
 			print_help();
