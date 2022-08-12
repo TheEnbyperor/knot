@@ -231,3 +231,5 @@ include $(srcdir)/knot/modules/rrl/Makefile.inc
 include $(srcdir)/knot/modules/stats/Makefile.inc
 include $(srcdir)/knot/modules/synthrecord/Makefile.inc
 include $(srcdir)/knot/modules/whoami/Makefile.inc
+include $(srcdir)/knot/modules/updateproxy/Makefile.inc
+include $(srcdir)/knot/modules/queryignoretsig/Makefile.inc
