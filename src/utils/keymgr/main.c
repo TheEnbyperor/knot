@@ -63,6 +63,8 @@ static void print_help(void)
 	       "                 (syntax: import-pem <pem_file_path> <attribute_name>=<value>...)\n"
 	       "  import-pkcs11 Import key stored in PKCS11 storage. Specify its parameters manually.\n"
 	       "                 (syntax: import-pkcs11 <key_id> <attribute_name>=<value>...)\n"
+	       "  add-to-policy Sets key ID to use for shared KSK policy.\n"
+	       "                 (syntax: add-to-policy <key_id> <policy>)\n"
 	       "  nsec3-salt    Print current NSEC3 salt. If a parameter is specified, set new salt.\n"
 	       "                 (syntax: nsec3-salt [<new_salt>])\n"
 	       "  local-serial  Print SOA serial stored in KASP database when using on-slave signing.\n"
@@ -168,6 +170,14 @@ static int key_command(int argc, char *argv[], int opt_ind, knot_lmdb_db_t *kasp
 	} else if (strcmp(argv[1], "import-pkcs11") == 0) {
 		CHECK_MISSING_ARG("Key ID to import not specified");
 		ret = keymgr_import_pkcs11(&kctx, argv[2], argc - 3, argv + 3);
+	} else if (strcmp(argv[1], "add-to-policy") == 0) {
+		CHECK_MISSING_ARG("Key ID not specified");
+		CHECK_MISSING_ARG2("Policy not specified");
+		ret = keymgr_add_to_policy(&kctx, argv[2], argv[3]);
+	} else if (strcmp(argv[1], "print-policy") == 0) {
+		CHECK_MISSING_ARG("Policy not specified");
+		ret = keymgr_print_policy(&kctx, argv[2]);
+		print_ok_on_succes = false;
 	} else if (strcmp(argv[1], "nsec3-salt") == 0) {
 		if (argc > 2) {
 			ret = keymgr_nsec3_salt_set(&kctx, argv[2]);
