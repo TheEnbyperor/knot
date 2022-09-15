@@ -41,7 +41,12 @@ static knotd_state_t updateproxy_fwd(knotd_state_t state, knot_pkt_t *pkt,
 	}
 
 	if (qdata->query->tsig_rr != NULL) {
-		knot_tsig_append(qdata->query->wire, &qdata->query->size, qdata->query->max_size, qdata->query->tsig_rr);
+	int ret = knot_tsig_append(qdata->query->wire, &qdata->query->size, 65535, qdata->query->tsig_rr);
+        if (ret != KNOT_EOK) {
+            knotd_mod_log(mod, LOG_ERR, "Failed to add TSIG to update request (%s)", knot_strerror(ret));
+            qdata->rcode = KNOT_RCODE_SERVFAIL;
+	    return KNOTD_STATE_FAIL;
+        }
 	}
 
 	const knot_layer_api_t *capture = query_capture_api();
