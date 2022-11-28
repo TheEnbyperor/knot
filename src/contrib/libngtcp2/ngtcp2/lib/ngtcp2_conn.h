@@ -142,8 +142,8 @@ typedef union ngtcp2_max_frame {
   ngtcp2_frame fr;
   struct {
     ngtcp2_ack ack;
-    /* ack includes 1 ngtcp2_ack_blk. */
-    ngtcp2_ack_blk blks[NGTCP2_MAX_ACK_BLKS - 1];
+    /* ack includes 1 ngtcp2_ack_range. */
+    ngtcp2_ack_range ranges[NGTCP2_MAX_ACK_RANGES - 1];
   } ackfr;
 } ngtcp2_max_frame;
 
@@ -431,9 +431,9 @@ struct ngtcp2_conn {
     size_t strmq_nretrans;
     /* ack is ACK frame.  The underlying buffer is reused. */
     ngtcp2_frame *ack;
-    /* max_ack_blks is the number of additional ngtcp2_ack_blk which
-       ack can contain. */
-    size_t max_ack_blks;
+    /* max_ack_ranges is the number of additional ngtcp2_ack_range
+       which ack can contain. */
+    size_t max_ack_ranges;
     /* offset is the offset the local endpoint has sent to the remote
        endpoint. */
     uint64_t offset;
@@ -1086,6 +1086,8 @@ ngtcp2_ssize ngtcp2_conn_write_application_close_pkt(
     ngtcp2_conn *conn, ngtcp2_path *path, ngtcp2_pkt_info *pi, uint8_t *dest,
     size_t destlen, uint64_t app_error_code, const uint8_t *reason,
     size_t reasonlen, ngtcp2_tstamp ts);
+
+int ngtcp2_conn_start_pmtud(ngtcp2_conn *conn);
 
 void ngtcp2_conn_stop_pmtud(ngtcp2_conn *conn);
 

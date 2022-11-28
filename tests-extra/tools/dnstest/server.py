@@ -73,6 +73,7 @@ class ZoneDnssec(object):
         self.cds_digesttype = None
         self.dnskey_mgmt = None
         self.offline_ksk = None
+        self.signing_threads = None
 
 class ZoneCatalogRole(enum.IntEnum):
     """Zone catalog roles."""
@@ -94,6 +95,7 @@ class Zone(object):
         self.ixfr = ixfr
         self.journal_content = journal_content # journal contents
         self.modules = []
+        self.reverse_from = None
         self.dnssec = ZoneDnssec()
         self.catalog_role = ZoneCatalogRole.NONE
         self.catalog_gen_name = None # Generated catalog name for this member
@@ -156,6 +158,7 @@ class Server(object):
         self.addr_extra = list()
         self.port = 53 # Needed for keymgr when port not yet generated
         self.udp_workers = None
+        self.bg_workers = None
         self.fixed_port = False
         self.ctlport = None
         self.external = False
@@ -1275,6 +1278,8 @@ class Knot(Server):
         s.item_str("listen", "%s@%s" % (self.addr, self.port))
         if self.udp_workers:
             s.item_str("udp-workers", self.udp_workers)
+        if self.bg_workers:
+            s.item_str("background-workers", self.bg_workers)
 
         for addr in self.addr_extra:
             s.item_str("listen", "%s@%s" % (addr, self.port))
@@ -1428,8 +1433,8 @@ class Knot(Server):
             self._bool(s, "manual", z.dnssec.manual)
             self._bool(s, "single-type-signing", z.dnssec.single_type_signing)
             self._str(s, "algorithm", z.dnssec.alg)
-            self._str(s, "ksk_size", z.dnssec.ksk_size)
-            self._str(s, "zsk_size", z.dnssec.zsk_size)
+            self._str(s, "ksk-size", z.dnssec.ksk_size)
+            self._str(s, "zsk-size", z.dnssec.zsk_size)
             self._str(s, "dnskey-ttl", z.dnssec.dnskey_ttl)
             self._str(s, "zone-max-ttl", z.dnssec.zone_max_ttl)
             self._str(s, "ksk-lifetime", z.dnssec.ksk_lifetime)
@@ -1455,7 +1460,9 @@ class Knot(Server):
                 self._str(s, "cds-digest-type", z.dnssec.cds_digesttype)
             self._str(s, "dnskey-management", z.dnssec.dnskey_mgmt)
             self._bool(s, "offline-ksk", z.dnssec.offline_ksk)
-            self._str(s, "signing-threads", str(random.randint(1,4)))
+            self._str(s, "signing-threads",
+                      z.dnssec.signing_threads if z.dnssec.signing_threads is not None
+                      else str(random.randint(1,4)))
         if have_policy:
             s.end()
 
@@ -1541,6 +1548,9 @@ class Knot(Server):
             self._str(s, "serial-policy", self.serial_policy)
 
             s.item_str("journal-content", z.journal_content)
+            
+            if z.reverse_from:
+                s.item_str("reverse-generate", z.reverse_from.name)
 
             self._str(s, "refresh-min-interval", z.refresh_min)
             self._str(s, "refresh-max-interval", z.refresh_max)

@@ -1,7 +1,7 @@
 AC_PREREQ([2.69])
 
 m4_define([knot_VERSION_MAJOR], 3)dnl
-m4_define([knot_VERSION_MINOR], 2)dnl
+m4_define([knot_VERSION_MINOR], 3)dnl
 m4_define([knot_VERSION_PATCH], )dnl Leave empty if the master branch!
 m4_include([m4/knot-version.m4])
 
@@ -220,6 +220,15 @@ AM_CONDITIONAL([EMBEDDED_LIBBPF], [test "$enable_xdp" = "embedded"])
 AM_CONDITIONAL([ENABLE_XDP], [test "$enable_xdp" != "no"])
 AC_SUBST([embedded_libbpf_CFLAGS])
 AC_SUBST([embedded_libbpf_LIBS])
+
+AS_IF([test "$enable_xdp" == "yes"], [
+   PKG_CHECK_MODULES([libxdp], [libxdp], [enable_xdp=libxdp], [enable_xdp=yes])
+   AS_IF([test "$enable_xdp" == "libxdp"], [
+      AC_DEFINE([USE_LIBXDP], [1], [Use external libxdp and libbpf.])
+      libbpf_CFLAGS="$libbpf_CFLAGS $libxdp_CFLAGS"
+      libbpf_LIBS="$libbpf_LIBS $libxdp_LIBS"
+   ])]
+)
 AC_SUBST([libbpf_CFLAGS])
 AC_SUBST([libbpf_LIBS])
 
@@ -558,12 +567,12 @@ AS_IF([test "$enable_daemon" = "yes" -o "$enable_utilities" = "yes"], [
 
 # QUIC support
 AC_ARG_ENABLE([quic],
-   AS_HELP_STRING([--enable-quic=auto|yes|no], [Support DoQ (needs libngtcp2 = 0.7.0, gnutls >= 3.7.2) [default=auto]]),
+   AS_HELP_STRING([--enable-quic=auto|yes|no], [Support DoQ (needs libngtcp2 >= 0.10.0, gnutls >= 3.7.2) [default=auto]]),
    [], [enable_quic=auto])
 
 AS_CASE([$enable_quic],
-   [auto], [PKG_CHECK_MODULES([libngtcp2], [libngtcp2 = 0.7.0 libngtcp2_crypto_gnutls], [enable_quic=yes], [enable_quic=no])],
-   [yes], [PKG_CHECK_MODULES([libngtcp2], [libngtcp2 = 0.7.0 libngtcp2_crypto_gnutls], [enable_quic=yes],
+   [auto], [PKG_CHECK_MODULES([libngtcp2], [libngtcp2 >= 0.10.0 libngtcp2_crypto_gnutls], [enable_quic=yes], [enable_quic=no])],
+   [yes], [PKG_CHECK_MODULES([libngtcp2], [libngtcp2 >= 0.10.0 libngtcp2_crypto_gnutls], [enable_quic=yes],
              AS_IF([test "$gnutls_quic" = "yes"],
                 [enable_quic=embedded
                  embedded_libngtcp2_CFLAGS="-I\$(top_srcdir)/src/contrib/libngtcp2 -I\$(top_srcdir)/src/contrib/libngtcp2/ngtcp2/lib"

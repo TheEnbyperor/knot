@@ -76,6 +76,9 @@ Options
 **-R**, **--mac-remote**
   Override auto-detected remote MAC address.
 
+**-v**, **--vlan** *id*
+  Add VLAN 802.1Q header with the given id. VLAN offloading should be disabled.
+
 **-h**, **--help**
   Print the program help.
 
@@ -135,8 +138,8 @@ Notes
 Linux kernel 4.18+ is required.
 
 The utility has to be executed under root or with these capabilities:
-CAP_NET_RAW, CAP_NET_ADMIN, CAP_SYS_ADMIN, and CAP_SYS_RESOURCE if maximum
-locked memory limit is too low on Linux < 5.11.
+CAP_NET_RAW, CAP_NET_ADMIN, CAP_SYS_ADMIN, CAP_IPC_LOCK, and CAP_SYS_RESOURCE
+(Linux < 5.11).
 
 The utility allocates source UDP/TCP ports from the range 2000-65535.
 

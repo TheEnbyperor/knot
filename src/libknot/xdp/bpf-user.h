@@ -25,7 +25,11 @@
 
 #pragma once
 
-#include <bpf/xsk.h>
+#if USE_LIBXDP
+ #include <xdp/xsk.h>
+#else
+ #include <bpf/xsk.h>
+#endif
 
 #include "libknot/xdp/xdp.h"
 
@@ -83,6 +87,10 @@ struct knot_xdp_socket {
 
 	/*! The limit of frame size. */
 	unsigned frame_limit;
+
+	/*! Mapping of interface indices to VLAN tags. */
+	uint16_t *vlan_map;
+	uint16_t vlan_map_max;
 };
 
 /*!

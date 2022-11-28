@@ -299,7 +299,7 @@ parameters (also DNSSEC signing applies), the existence of a zone file and journ
 (and their relative out-of-dateness), and whether it is a cold start of the server
 or a zone reload (e.g. invoked by the :doc:`knotc<man_knotc>` interface). Please note
 that zone transfers are not taken into account here – they are planned after the zone
-is loaded (including AXFR bootstrap).
+is loaded (including :ref:`zone bootstrap<Zone bootstrap>`).
 
 If the zone file exists and is not excluded by the configuration, it is first loaded
 and according to its SOA serial number, relevant journal changesets are applied.
@@ -429,6 +429,33 @@ automatically. So the user no longer needs to care about it in the zone file.
 
 However, this requires setting :ref:`zone_journal-content` to `all` so that
 the information about the last real SOA serial is preserved in case of server re-start.
+
+.. _Zone bootstrap:
+
+Zone bootstrapping on secondary
+===============================
+
+When zone refresh from the primary fails, the ``retry`` value from SOA is used
+as the interval between refresh attempts. In a case that SOA isn't known to the
+secondary (either because the zone hasn't been retrieved from the primary yet,
+or the zone has expired), an exponential backoff is used for repeated retry
+attempts.
+
+The backoff works as follows: first a random interval between 0 and 30 secs is
+chosen. This is the first iteration interval. Then, each following attempt interval
+takes the same time as what time has passed since the last expiration (or since
+the first unsuccessfull attempt to transfer the zone from the primary), and again
+random 0 to 30 seconds are added to it. These steps repeat as necessary.
+As a result, the interval effectively approximately doubles in each attempt under
+normal circumstances.
+
+However, if `knotd` was halted for some time and the refresh hasn't been successful
+yet, that pause accounts into the new interval too, irrespective of whether there
+actually were any real retry attempts in the meantime, or not.
+
+In each attempt, retry interval is subject to :ref:`zone_retry-min-interval`
+and :ref:`zone_retry-max-interval`. As a safety measure, retry interval during
+zone bootstrap is always limited to 24 hours as maximum.
 
 .. _DNSSEC Key states:
 
@@ -743,8 +770,8 @@ performing a ZSK rollover, the DNSKEY records will be pre-generated and signed b
 signer (the "KSK side"). Both sides exchange keys in the form of human-readable messages with the help
 of the :doc:`keymgr<man_keymgr>` utility.
 
-Pre-requisites
---------------
+Prerequisites
+-------------
 
 For the ZSK side (i.e. the operator of the DNS server), the zone has to be configured with:
 
@@ -765,8 +792,8 @@ For the KSK side (i.e. the operator of the KSK signer), the zone has to be confi
   - Enabled :ref:`policy_manual`
   - Enabled :ref:`policy_offline-ksk`
   - Optional :ref:`policy_rrsig-lifetime`, :ref:`policy_rrsig-refresh`,
-    :ref:`policy_algorithm`, and :ref:`policy_reproducible-signing`,
-    :ref:`policy_cds-cdnskey-publish`
+    :ref:`policy_algorithm`, :ref:`policy_reproducible-signing`,
+    and :ref:`policy_cds-cdnskey-publish`
   - Other options are ignored
 - KASP DB contains a KSK (the present or a newly generated one)
 
@@ -1121,6 +1148,11 @@ Pre-requisites
 
   All the capabilities are dropped upon the service is started.
 
+* For proper processing of VLAN traffic, VLAN offloading should be disabled. E.g.::
+
+    ethtool -K <interface> tx-vlan-offload off rx-vlan-offload off
+
+
 Optimizations
 -------------
 
@@ -1135,7 +1167,7 @@ Some helpful commands::
 Limitations
 -----------
 
-* VLAN segmentation is not supported.
+* Request and its response must go through the same physical network device.
 * Dynamic DNS over XDP is not supported.
 * MTU higher than 1790 bytes is not supported.
 * Multiple BPF filters per one network device are not supported.
@@ -1144,4 +1176,4 @@ Limitations
 * DNS over XDP traffic is not visible to common system tools (e.g. firewall, tcpdump etc.).
 * BPF filter is not automatically unloaded from the network device. Manual filter unload::
 
-   ip link set dev <ETH> xdp off
+   ip link set dev <interface> xdp off

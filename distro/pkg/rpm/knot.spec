@@ -76,16 +76,16 @@ BuildRequires:	pkgconfig(libelf)
 %else
 # XDP is auto-enabled when libbpf is present
 %define configure_xdp --enable-quic=yes
-BuildRequires:  pkgconfig(libbpf) >= 0.0.6
+BuildRequires:	pkgconfig(libbpf) >= 0.0.6
+%if 0%{?fedora} >= 36
+BuildRequires:	pkgconfig(libxdp)
+%endif
 %endif
 %endif
 
 Requires(post):		systemd %{_sbindir}/runuser
 Requires(preun):	systemd
 Requires(postun):	systemd
-
-# Knot DNS 2.7+ isn't compatible with earlier knot-resolver
-Conflicts:	knot-resolver < 3.0.0
 
 Requires:	%{name}-libs%{?_isa} = %{version}-%{release}
 
@@ -94,6 +94,8 @@ Knot DNS is a high-performance authoritative DNS server implementation.
 
 %package libs
 Summary:	Libraries used by the Knot DNS server and client applications
+# Knot DNS 3.2+ isn't compatible with earlier knot-resolver
+Conflicts:	knot-resolver < 5.5.2
 
 %description libs
 The package contains shared libraries used by the Knot DNS server and
@@ -140,7 +142,7 @@ The package contains geoip Knot DNS module for geography-based responses.
 %package doc
 Summary:	Documentation for the Knot DNS server
 BuildArch:	noarch
-Provides:	bundled(jquery) = 3.1.0
+Provides:	bundled(jquery)
 
 %description doc
 The package contains documentation for the Knot DNS server.
@@ -334,6 +336,6 @@ getent passwd knot >/dev/null || \
 %doc %{_pkgdocdir}/html
 
 %changelog
-* {{ now }} Jakub Ružička <jakub.ruzicka@nic.cz> - {{ version }}-{{ release }}
+* {{ now }} Knot DNS <knot-dns@labs.nic.cz> - {{ version }}-{{ release }}
 - upstream package
 - see https://www.knot-dns.cz

@@ -635,9 +635,9 @@ int check_policy(
 	                                            C_NSEC3_ITER, args->id, args->id_len);
 
 	unsigned algorithm = conf_opt(&alg);
-	if (algorithm == 3 || algorithm == 6) {
-		args->err_str = "DSA algorithm no longer supported";
-		return KNOT_EINVAL;
+	if (algorithm < DNSSEC_KEY_ALGORITHM_RSA_SHA256) {
+		CONF_LOG(LOG_NOTICE, "algorithm %u is deprecated and shouldn't be used for DNSSEC signing",
+		         algorithm);
 	}
 
 	int64_t ksk_size = conf_int(&ksk);
@@ -873,13 +873,21 @@ int check_zone(
 
 	conf_val_t zf_load = conf_zone_get_txn(args->extra->conf, args->extra->txn,
 	                                       C_ZONEFILE_LOAD, yp_dname(args->id));
+	conf_val_t journal = conf_zone_get_txn(args->extra->conf, args->extra->txn,
+					       C_JOURNAL_CONTENT, yp_dname(args->id));
 	if (conf_opt(&zf_load) == ZONEFILE_LOAD_DIFSE) {
-		conf_val_t journal = conf_zone_get_txn(args->extra->conf, args->extra->txn,
-		                                       C_JOURNAL_CONTENT, yp_dname(args->id));
 		if (conf_opt(&journal) != JOURNAL_CONTENT_ALL) {
 			args->err_str = "'zonefile-load: difference-no-serial' requires 'journal-content: all'";
 			return KNOT_EINVAL;
 		}
+	}
+
+	conf_val_t reverse = conf_zone_get_txn(args->extra->conf, args->extra->txn,
+	                                       C_REVERSE_GEN, yp_dname(args->id));
+	if (reverse.code == KNOT_EOK &&
+	    !(conf_opt(&zf_load) == ZONEFILE_LOAD_DIFSE && conf_opt(&journal) == JOURNAL_CONTENT_ALL)) {
+		args->err_str = "'reverse-generate' requires 'zonefile-load: difference-no-serial' and 'journal-content: all'";
+		return KNOT_EINVAL;
 	}
 
 	conf_val_t validation = conf_zone_get_txn(args->extra->conf, args->extra->txn,
@@ -925,6 +933,22 @@ int check_zone(
 			CHECK_CATZ_TPL(C_CATALOG_ZONE,  "catalog-zone");
 			CHECK_CATZ_TPL(C_CATALOG_GROUP, "catalog-group");
 			conf_val_next(&catalog_tpl);
+		}
+	}
+
+	conf_val_t ds_push = conf_zone_get_txn(args->extra->conf, args->extra->txn,
+	                                       C_DS_PUSH, yp_dname(args->id));
+	if (ds_push.code == KNOT_EOK) {
+		conf_val_t policy_id = conf_zone_get_txn(args->extra->conf, args->extra->txn,
+		                                         C_DNSSEC_POLICY, yp_dname(args->id));
+		if (policy_id.code == KNOT_EOK) {
+			conf_val_t cds_cdnskey = conf_id_get_txn(args->extra->conf, args->extra->txn,
+			                                         C_POLICY, C_CDS_CDNSKEY,
+			                                         &policy_id);
+			if (conf_val_count(&ds_push) > 0 && conf_opt(&cds_cdnskey) == CDS_CDNSKEY_NONE) {
+				args->err_str = "DS push requires enabled CDS/CDNSKEY publication";
+				return KNOT_EINVAL;
+			}
 		}
 	}
 

@@ -208,6 +208,7 @@ server:
     automatic\-acl: BOOL
     proxy\-allowlist: ADDR[/INT] | ADDR\-ADDR ...
     dbus\-event: none | running | zone\-updated | ksk\-submission | dnssec\-invalid ...
+    dbus\-init\-delay: TIME
     listen: ADDR[@INT] ...
 .ft P
 .fi
@@ -549,7 +550,19 @@ This function requires systemd version at least 221.
 .UNINDENT
 .UNINDENT
 .sp
+Change of this parameter requires restart of the Knot server to take effect.
+.sp
 \fIDefault:\fP \fBnone\fP
+.SS dbus\-init\-delay
+.sp
+Time in seconds which the server waits upon D\-Bus initialization to ensure
+the D\-Bus client is ready to receive signals.
+.sp
+Change of this parameter requires restart of the Knot server to take effect.
+.sp
+\fIMinimum:\fP \fB0\fP
+.sp
+\fIDefault:\fP \fB1\fP
 .SS listen
 .sp
 One or more IP addresses where the server listens for incoming queries.
@@ -726,11 +739,13 @@ the incoming one, the packet is processed normally by UDP/TCP workers
 If the destination address is blackholed, unreachable, or prohibited,
 the DNS packet is dropped without any response.
 .IP \(bu 2
-The destination MAC address for the response is taken from the routing system.
+The destination MAC address and possible VLAN tag for the response are taken
+from the routing system.
 .UNINDENT
 .sp
 If disabled, symmetrical routing is applied. It means that the query source
-MAC address is used as a response destination MAC address.
+MAC address is used as a response destination MAC address. Possible VLAN tag
+is preserved.
 .sp
 Change of this parameter requires restart of the Knot server to take effect.
 .sp
@@ -740,6 +755,8 @@ Change of this parameter requires restart of the Knot server to take effect.
 This mode requires forwarding enabled on the loopback interface
 (\fBsysctl \-w net.ipv4.conf.lo.forwarding=1\fP and \fBsysctl \-w net.ipv6.conf.lo.forwarding=1\fP).
 If forwarding is disabled, all incoming DNS packets are dropped!
+.sp
+Only VLAN 802.1Q is supported.
 .UNINDENT
 .UNINDENT
 .sp
@@ -1654,7 +1671,11 @@ is needed.
 .sp
 An extra delay added for each key rollover step. This value should be high
 enough to cover propagation of data from the primary server to all
-secondary servers.
+secondary servers, as well as the duration of signing routine itself and
+possible outages in signing and propagation infrastructure. In other words,
+this delay should ensure that within this period of time after planned
+change of the key set, all public\-facing secondaries will already serve
+new DNSKEY RRSet for sure.
 .sp
 \fBNOTE:\fP
 .INDENT 0.0
@@ -1773,6 +1794,15 @@ It\(aqs possible to manage both child and parent zones by the same Knot DNS serv
 .INDENT 3.5
 This feature requires \fI\%cds\-cdnskey\-publish\fP
 not to be set to \fBnone\fP\&.
+.UNINDENT
+.UNINDENT
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+The mentioned change to CDS record usually means that a KSK roll\-over is running
+and the new key being rolled\-in is in "ready" state already for the period of
+\fI\%propagation\-delay\fP\&.
 .UNINDENT
 .UNINDENT
 .sp
@@ -1958,9 +1988,11 @@ zone:
     dnssec\-signing: BOOL
     dnssec\-validation: BOOL
     dnssec\-policy: policy_id
+    ds\-push: remote_id | remotes_id ...
     zonemd\-verify: BOOL
     zonemd\-generate: none | zonemd\-sha384 | zonemd\-sha512 | remove
     serial\-policy: increment | unixtime | dateserial
+    reverse\-generate: DNAME
     refresh\-min\-interval: TIME
     refresh\-max\-interval: TIME
     retry\-min\-interval: TIME
@@ -2080,6 +2112,8 @@ DNAME record having a record under it (\fI\%RFC 6672\fP)
 Multiple DNAME records with the same owner exist (\fI\%RFC 6672\fP)
 .IP \(bu 2
 NS record exists together with a DNAME record (\fI\%RFC 6672\fP)
+.IP \(bu 2
+DS record exists at the zone apex (\fI\%RFC 3658\fP)
 .UNINDENT
 .sp
 Extra checks:
@@ -2092,6 +2126,8 @@ Missing glue A or AAAA record
 Invalid DS or NSEC3PARAM record
 .IP \(bu 2
 CDS or CDNSKEY inconsistency
+.IP \(bu 2
+DS record exists at a non\-delegation point (\fI\%RFC 3658\fP)
 .IP \(bu 2
 All other DNSSEC checks executed during \fI\%dnssec\-validation\fP
 .UNINDENT
@@ -2260,6 +2296,12 @@ A \fI\%reference\fP to DNSSEC signing policy.
 A configured policy called "default" won\(aqt be used unless explicitly referenced.
 .UNINDENT
 .UNINDENT
+.SS ds\-push
+.sp
+Per zone configuration of \fI\%ds\-push\fP\&. This option overrides possible
+per policy option.
+.sp
+\fIDefault:\fP not set
 .SS zonemd\-verify
 .sp
 On each zone load/update, verify that ZONEMD is present in the zone and valid.
@@ -2322,6 +2364,23 @@ Generated catalog zones use \fBunixtime\fP only.
 .UNINDENT
 .sp
 \fIDefault:\fP \fBincrement\fP (\fBunixtime\fP for generated catalog zones)
+.SS reverse\-generate
+.sp
+Triggers auto\-generating reverse PTR records into this zone, based on A/AAAA records
+in the zone specified by this option.
+.sp
+Limitations (may be relaxed in the future):
+.INDENT 0.0
+.IP \(bu 2
+Only one zone to be reversed can be specified.
+.IP \(bu 2
+Requires \fI\%journal\-content\fP: \fBall\fP and
+\fI\%zonefile\-load\fP: \fBdifference\-no\-serial\fP\&.
+.IP \(bu 2
+Is slow for large zones (even when changing a little).
+.UNINDENT
+.sp
+\fIDefault:\fP none
 .SS refresh\-min\-interval
 .sp
 Forced minimum zone refresh interval (in seconds) to avoid flooding primary server.

@@ -1,41 +1,16 @@
-Requirements
-------------
+# packaging tests
 
-- ansible
-- vagrant
-- libvirt (+vagrant-libvirt) / virtualbox
+Debian autopkgtests from `distro/pkg/deb/tests` are reused here
+using `apkg test` and symlinks.
 
-Usage
------
+To run tests (from project root):
 
-`vagrant up` command is configured to trigger ansible provisioning
-which configures OBS repository, installs the knot package, creates
-a zone and config file, starts the knot.service and attempts to
-resolve the entry from created zone file.
+    apkg test
 
-By default, the *knot-dns-devel* repo is used. To test the
-*knot-dns-latest* or *knot-dns-testing* repo, set it in `repos.yaml`
-(or use the test-distro.sh script which overwrites this file). If
-you're running tests in parallel, they all HAVE TO use the same repo.
+See templated tests control: distro/tests/extra/all
 
-Run the following command for every distro (aka directory with
-Vagrantfile):
+To see rendered control (from project root):
 
-```
-./test-distro.sh knot-dns-devel debian9
-```
+    apkg test --show-control [--distro debian-11]
 
-or
-
-```
-./test-distro.sh knot-dns-testing debian9
-```
-
-or
-
-```
-./test-distro.sh knot-dns-latest debian9
-```
-
-At the end of the test, the package version that was tested is
-printed out. Make sure you're testing what you intended to.
+See [apkg test docs](https://pkg.labs.nic.cz/pages/apkg/test/).

@@ -382,12 +382,12 @@ static void handle_quic(xdp_handle_ctx_t *ctx, knot_layer_t *layer,
 		knot_xquic_stream_t *stream;
 
 		while (rl != NULL && (stream = knot_xquic_stream_get_process(rl, &stream_id)) != NULL) {
-			assert(stream->inbuf_fin);
-			assert(stream->inbuf.iov_len > 0);
-			handle_quic_stream(rl, stream_id, &stream->inbuf, layer, params,
+			assert(stream->inbuf_fin != NULL);
+			assert(stream->inbuf_fin->iov_len > 0);
+			handle_quic_stream(rl, stream_id, stream->inbuf_fin, layer, params,
 			                   ans_buf, sizeof(ans_buf), &ctx->msg_recv[i]);
-			stream->inbuf.iov_len = 0;
-			stream->inbuf_fin = false;
+			free(stream->inbuf_fin);
+			stream->inbuf_fin = NULL;
 		}
 	}
 #else
@@ -422,10 +422,13 @@ void xdp_handle_msgs(xdp_handle_ctx_t *ctx, knot_layer_t *layer,
 void xdp_handle_send(xdp_handle_ctx_t *ctx)
 {
 	uint32_t unused;
-	(void)knot_xdp_send(ctx->sock, ctx->msg_send_udp, ctx->msg_udp_count, &unused);
+	int ret = knot_xdp_send(ctx->sock, ctx->msg_send_udp, ctx->msg_udp_count, &unused);
+	if (ret != KNOT_EOK) {
+		log_notice("UDP, failed to send some packets");
+	}
 	if (ctx->tcp) {
-		int ret = knot_tcp_send(ctx->sock, ctx->relays, ctx->msg_recv_count,
-		                        XDP_BATCHLEN);
+		ret = knot_tcp_send(ctx->sock, ctx->relays, ctx->msg_recv_count,
+		                    XDP_BATCHLEN);
 		if (ret != KNOT_EOK) {
 			log_notice("TCP, failed to send some packets");
 		}
@@ -436,13 +439,14 @@ void xdp_handle_send(xdp_handle_ctx_t *ctx)
 			continue;
 		}
 
-		int ret = knot_xquic_send(ctx->quic_table, ctx->quic_relays[i], ctx->sock,
-		                          &ctx->msg_recv[i], ctx->quic_rets[i],
-		                          QUIC_MAX_SEND_PER_RECV, false);
+		ret = knot_xquic_send(ctx->quic_table, ctx->quic_relays[i], ctx->sock,
+		                      &ctx->msg_recv[i], ctx->quic_rets[i],
+		                      QUIC_MAX_SEND_PER_RECV, false);
 		if (ret != KNOT_EOK) {
 			log_notice("QUIC, failed to send some packets");
 		}
 	}
+	knot_xquic_cleanup(ctx->quic_relays, ctx->msg_recv_count);
 #endif // ENABLE_QUIC
 
 	(void)knot_xdp_send_finish(ctx->sock);

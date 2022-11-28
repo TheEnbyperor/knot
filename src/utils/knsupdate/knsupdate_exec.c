@@ -439,6 +439,8 @@ static int pkt_sendrecv(knsupdate_params_t *params)
 	               NULL,
 	               NULL,
 	               NULL,
+		       NULL,
+		       NULL,
 	               &net);
 	if (ret != KNOT_EOK) {
 		return -1;
@@ -968,7 +970,7 @@ int cmd_answer(const char* lp, knsupdate_params_t *params)
 		return KNOT_EOK;
 	}
 
-	printf("\nAnswer:\n");
+	printf("Answer:\n");
 	print_packet(params->answer, NULL, 0, -1, 0, true, &params->style);
 
 	return KNOT_EOK;

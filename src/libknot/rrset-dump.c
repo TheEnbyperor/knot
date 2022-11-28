@@ -1759,9 +1759,11 @@ static int dump_rrsig(DUMP_PARAMS)
 	}
 	DUMP_TIMESTAMP; DUMP_SPACE;
 	DUMP_NUM16;  DUMP_SPACE;
-	DUMP_DNAME;  DUMP_SPACE;
+	DUMP_DNAME;
 	if (p->style->wrap) {
 		WRAP_LINE;
+	} else {
+		DUMP_SPACE;
 	}
 	if (p->style->hide_crypto) {
 		DUMP_OMIT;
@@ -1802,7 +1804,7 @@ static int dump_nsec3(DUMP_PARAMS)
 		DUMP_NUM8;   DUMP_SPACE;
 		DUMP_NUM16;  DUMP_SPACE;
 		DUMP_SALT;   DUMP_SPACE; WRAP_INIT;
-		DUMP_HASH;   DUMP_SPACE; WRAP_LINE;
+		DUMP_HASH;   WRAP_LINE;
 		DUMP_BITMAP;
 		WRAP_END;
 	} else {
@@ -1901,7 +1903,7 @@ static int dump_tsig(DUMP_PARAMS)
 		DUMP_DNAME; DUMP_SPACE;
 		DUMP_NUM48; DUMP_SPACE;
 		DUMP_NUM16; DUMP_SPACE; WRAP_INIT;
-		DUMP_TSIG_DGST; DUMP_SPACE; WRAP_LINE;
+		DUMP_TSIG_DGST; WRAP_LINE;
 		DUMP_NUM16; DUMP_SPACE;
 		DUMP_TSIG_RCODE; DUMP_SPACE;
 		DUMP_TSIG_DATA;
@@ -1940,19 +1942,21 @@ static int dump_caa(DUMP_PARAMS)
 static int dump_svcb(DUMP_PARAMS)
 {
 	DUMP_NUM16; DUMP_SPACE;
-	DUMP_DNAME; DUMP_SPACE;
+	DUMP_DNAME;
 	if (p->style->wrap) {
-		WRAP_INIT;
 		if (p->in_max > 0) {
-			DUMP_SVCPARAM; DUMP_SPACE;
+			DUMP_SPACE;
+			WRAP_INIT;
+			DUMP_SVCPARAM;
+			while (p->in_max > 0) {
+				WRAP_LINE; DUMP_SVCPARAM;
+			}
+			WRAP_END;
 		}
-		while (p->in_max > 0) {
-			WRAP_LINE; DUMP_SVCPARAM; DUMP_SPACE;
-		}
-		WRAP_END;
 	} else {
 		while (p->in_max > 0) {
-			DUMP_SVCPARAM; DUMP_SPACE;
+			DUMP_SPACE;
+			DUMP_SVCPARAM;
 		}
 	}
 

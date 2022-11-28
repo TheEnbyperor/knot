@@ -13,12 +13,15 @@ RUN apt-get -y install \
 	git \
 	language-pack-en \
 	latexmk \
+	libbpf-dev \
 	libedit-dev \
 	libfstrm-dev \
 	libgnutls28-dev \
 	libidn2-0-dev \
 	liblmdb-dev \
 	libmaxminddb-dev \
+	libmnl-dev \
+	libnghttp2-dev \
 	libprotobuf-c-dev \
 	libsystemd-dev \
 	libtool \

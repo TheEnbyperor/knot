@@ -159,6 +159,7 @@ General options related to the server.
      automatic-acl: BOOL
      proxy-allowlist: ADDR[/INT] | ADDR-ADDR ...
      dbus-event: none | running | zone-updated | ksk-submission | dnssec-invalid ...
+     dbus-init-delay: TIME
      listen: ADDR[@INT] ...
 
 .. CAUTION::
@@ -591,7 +592,23 @@ Possible values:
 .. NOTE::
    This function requires systemd version at least 221.
 
+Change of this parameter requires restart of the Knot server to take effect.
+
 *Default:* ``none``
+
+.. _server_dbus-init-delay:
+
+dbus-init-delay
+---------------
+
+Time in seconds which the server waits upon D-Bus initialization to ensure
+the D-Bus client is ready to receive signals.
+
+Change of this parameter requires restart of the Knot server to take effect.
+
+*Minimum:* ``0``
+
+*Default:* ``1``
 
 .. _server_listen:
 
@@ -803,10 +820,12 @@ when processing every incoming DNS packet received over the XDP interface:
   (XDP isn't used).
 - If the destination address is blackholed, unreachable, or prohibited,
   the DNS packet is dropped without any response.
-- The destination MAC address for the response is taken from the routing system.
+- The destination MAC address and possible VLAN tag for the response are taken
+  from the routing system.
 
 If disabled, symmetrical routing is applied. It means that the query source
-MAC address is used as a response destination MAC address.
+MAC address is used as a response destination MAC address. Possible VLAN tag
+is preserved.
 
 Change of this parameter requires restart of the Knot server to take effect.
 
@@ -814,6 +833,8 @@ Change of this parameter requires restart of the Knot server to take effect.
    This mode requires forwarding enabled on the loopback interface
    (``sysctl -w net.ipv4.conf.lo.forwarding=1`` and ``sysctl -w net.ipv6.conf.lo.forwarding=1``).
    If forwarding is disabled, all incoming DNS packets are dropped!
+
+   Only VLAN 802.1Q is supported.
 
 *Default:* ``off``
 
@@ -1833,7 +1854,11 @@ propagation-delay
 
 An extra delay added for each key rollover step. This value should be high
 enough to cover propagation of data from the primary server to all
-secondary servers.
+secondary servers, as well as the duration of signing routine itself and
+possible outages in signing and propagation infrastructure. In other words,
+this delay should ensure that within this period of time after planned
+change of the key set, all public-facing secondaries will already serve
+new DNSKEY RRSet for sure.
 
 .. NOTE::
    Has influence over ZSK key lifetime.
@@ -1982,6 +2007,11 @@ It's possible to manage both child and parent zones by the same Knot DNS server.
 .. NOTE::
    This feature requires :ref:`cds-cdnskey-publish<policy_cds-cdnskey-publish>`
    not to be set to ``none``.
+
+.. NOTE::
+   The mentioned change to CDS record usually means that a KSK roll-over is running
+   and the new key being rolled-in is in "ready" state already for the period of
+   :ref:`propagation-delay<policy_propagation-delay>`.
 
 .. NOTE::
    Module :ref:`Onlinesign<mod-onlinesign>` doesn't support DS push.
@@ -2150,9 +2180,11 @@ Definition of zones served by the server.
      dnssec-signing: BOOL
      dnssec-validation: BOOL
      dnssec-policy: policy_id
+     ds-push: remote_id | remotes_id ...
      zonemd-verify: BOOL
      zonemd-generate: none | zonemd-sha384 | zonemd-sha512 | remove
      serial-policy: increment | unixtime | dateserial
+     reverse-generate: DNAME
      refresh-min-interval: TIME
      refresh-max-interval: TIME
      retry-min-interval: TIME
@@ -2288,6 +2320,7 @@ Mandatory checks affected by the soft mode:
 - DNAME record having a record under it (:rfc:`6672`)
 - Multiple DNAME records with the same owner exist (:rfc:`6672`)
 - NS record exists together with a DNAME record (:rfc:`6672`)
+- DS record exists at the zone apex (:rfc:`3658`)
 
 Extra checks:
 
@@ -2295,6 +2328,7 @@ Extra checks:
 - Missing glue A or AAAA record
 - Invalid DS or NSEC3PARAM record
 - CDS or CDNSKEY inconsistency
+- DS record exists at a non-delegation point (:rfc:`3658`)
 - All other DNSSEC checks executed during :ref:`zone_dnssec-validation`
 
 .. NOTE::
@@ -2465,6 +2499,16 @@ A :ref:`reference<policy_id>` to DNSSEC signing policy.
 .. NOTE::
    A configured policy called "default" won't be used unless explicitly referenced.
 
+.. _zone_ds-push:
+
+ds-push
+-------
+
+Per zone configuration of :ref:`policy_ds-push`. This option overrides possible
+per policy option.
+
+*Default:* not set
+
 .. _zone_zonemd-verify:
 
 zonemd-verify
@@ -2521,6 +2565,23 @@ Possible values:
    Generated catalog zones use ``unixtime`` only.
 
 *Default:* ``increment`` (``unixtime`` for generated catalog zones)
+
+.. _zone_reverse-generate:
+
+reverse-generate
+----------------
+
+Triggers auto-generating reverse PTR records into this zone, based on A/AAAA records
+in the zone specified by this option.
+
+Limitations (may be relaxed in the future):
+
+- Only one zone to be reversed can be specified.
+- Requires :ref:`zone_journal-content`: ``all`` and
+  :ref:`zone_zonefile-load`: ``difference-no-serial``.
+- Is slow for large zones (even when changing a little).
+
+*Default:* none
 
 .. _zone_refresh-min-interval:
 

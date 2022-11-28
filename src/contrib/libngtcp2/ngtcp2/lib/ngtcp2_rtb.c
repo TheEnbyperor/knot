@@ -34,6 +34,7 @@
 #include "ngtcp2_cc.h"
 #include "ngtcp2_rcvry.h"
 #include "ngtcp2_rst.h"
+#include "ngtcp2_unreachable.h"
 
 int ngtcp2_frame_chain_new(ngtcp2_frame_chain **pfrc, const ngtcp2_mem *mem) {
   *pfrc = ngtcp2_mem_malloc(mem, sizeof(ngtcp2_frame_chain));
@@ -319,6 +320,7 @@ void ngtcp2_rtb_init(ngtcp2_rtb *rtb, ngtcp2_pktns_id pktns_id,
   rtb->cc_bytes_in_flight = 0;
   rtb->persistent_congestion_start_ts = UINT64_MAX;
   rtb->num_lost_pkts = 0;
+  rtb->num_lost_pmtud_pkts = 0;
 }
 
 void ngtcp2_rtb_free(ngtcp2_rtb *rtb) {
@@ -361,12 +363,18 @@ static void rtb_on_add(ngtcp2_rtb *rtb, ngtcp2_rtb_entry *ent,
   }
 }
 
-static void rtb_on_remove(ngtcp2_rtb *rtb, ngtcp2_rtb_entry *ent,
-                          ngtcp2_conn_stat *cstat) {
+static size_t rtb_on_remove(ngtcp2_rtb *rtb, ngtcp2_rtb_entry *ent,
+                            ngtcp2_conn_stat *cstat) {
   if (ent->flags & NGTCP2_RTB_ENTRY_FLAG_LOST_RETRANSMITTED) {
     assert(rtb->num_lost_pkts);
     --rtb->num_lost_pkts;
-    return;
+
+    if (ent->flags & NGTCP2_RTB_ENTRY_FLAG_PMTUD_PROBE) {
+      assert(rtb->num_lost_pmtud_pkts);
+      --rtb->num_lost_pmtud_pkts;
+    }
+
+    return 0;
   }
 
   if (ent->flags & NGTCP2_RTB_ENTRY_FLAG_ACK_ELICITING) {
@@ -391,16 +399,33 @@ static void rtb_on_remove(ngtcp2_rtb *rtb, ngtcp2_rtb_entry *ent,
 
     assert(rtb->cc_bytes_in_flight >= ent->pktlen);
     rtb->cc_bytes_in_flight -= ent->pktlen;
+
+    /* If PMTUD packet is lost, we do not report the lost bytes to the
+       caller in order to ignore loss of PMTUD packet. */
+    if (ent->flags & NGTCP2_RTB_ENTRY_FLAG_PMTUD_PROBE) {
+      return 0;
+    }
+
+    return ent->pktlen;
   }
+
+  return 0;
 }
+
+/* NGTCP2_RECLAIM_FLAG_NONE indicates that no flag is set. */
+#define NGTCP2_RECLAIM_FLAG_NONE 0x00u
+/* NGTCP2_RECLAIM_FLAG_ON_LOSS indicates that frames are reclaimed
+   because of the packet loss.*/
+#define NGTCP2_RECLAIM_FLAG_ON_LOSS 0x01u
 
 /*
  * rtb_reclaim_frame queues unacknowledged frames included in |ent|
  * for retransmission.  The re-queued frames are not deleted from
- * |ent|.  It returns the number of frames queued.
+ * |ent|.  It returns the number of frames queued.  |flags| is bitwise
+ * OR of 0 or more of NGTCP2_RECLAIM_FLAG_*.
  */
-static ngtcp2_ssize rtb_reclaim_frame(ngtcp2_rtb *rtb, ngtcp2_conn *conn,
-                                      ngtcp2_pktns *pktns,
+static ngtcp2_ssize rtb_reclaim_frame(ngtcp2_rtb *rtb, uint8_t flags,
+                                      ngtcp2_conn *conn, ngtcp2_pktns *pktns,
                                       ngtcp2_rtb_entry *ent) {
   ngtcp2_frame_chain *frc, *nfrc, **pfrc = &pktns->tx.frq;
   ngtcp2_frame *fr;
@@ -445,6 +470,12 @@ static ngtcp2_ssize rtb_reclaim_frame(ngtcp2_rtb *rtb, ngtcp2_conn *conn,
         } else if (strm->flags & NGTCP2_STRM_FLAG_FIN_ACKED) {
           continue;
         }
+      }
+
+      if ((flags & NGTCP2_RECLAIM_FLAG_ON_LOSS) &&
+          ent->hd.pkt_num != strm->tx.last_lost_pkt_num) {
+        strm->tx.last_lost_pkt_num = ent->hd.pkt_num;
+        ++strm->tx.loss_count;
       }
 
       rv = ngtcp2_frame_chain_stream_datacnt_objalloc_new(
@@ -596,7 +627,9 @@ static int rtb_on_pkt_lost(ngtcp2_rtb *rtb, ngtcp2_ksl_it *it,
     ngtcp2_qlog_pkt_lost(rtb->qlog, ent);
   }
 
-  if (rtb->cc->on_pkt_lost) {
+  if (ent->flags & NGTCP2_RTB_ENTRY_FLAG_PMTUD_PROBE) {
+    ++rtb->num_lost_pmtud_pkts;
+  } else if (rtb->cc->on_pkt_lost) {
     cc->on_pkt_lost(cc, cstat,
                     ngtcp2_cc_pkt_init(&pkt, ent->hd.pkt_num, ent->pktlen,
                                        rtb->pktns_id, ent->ts, ent->rst.lost,
@@ -635,7 +668,8 @@ static int rtb_on_pkt_lost(ngtcp2_rtb *rtb, ngtcp2_ksl_it *it,
     assert(!(ent->flags & NGTCP2_RTB_ENTRY_FLAG_LOST_RETRANSMITTED));
     assert(UINT64_MAX == ent->lost_ts);
 
-    reclaimed = rtb_reclaim_frame(rtb, conn, pktns, ent);
+    reclaimed =
+        rtb_reclaim_frame(rtb, NGTCP2_RECLAIM_FLAG_ON_LOSS, conn, pktns, ent);
     if (reclaimed < 0) {
       return (int)reclaimed;
     }
@@ -807,7 +841,7 @@ static int rtb_process_acked_pkt(ngtcp2_rtb *rtb, ngtcp2_rtb_entry *ent,
         pktns = &conn->pktns;
         break;
       default:
-        assert(0);
+        ngtcp2_unreachable();
       }
 
       conn_ack_crypto_data(conn, pktns, datalen);
@@ -929,7 +963,7 @@ ngtcp2_ssize ngtcp2_rtb_recv_ack(ngtcp2_rtb *rtb, const ngtcp2_ack *fr,
   size_t ecn_acked = 0;
   int verify_ecn = 0;
   ngtcp2_cc_ack cc_ack = {0};
-  size_t num_lost_pkts = rtb->num_lost_pkts;
+  size_t num_lost_pkts = rtb->num_lost_pkts - rtb->num_lost_pmtud_pkts;
 
   cc_ack.prior_bytes_in_flight = cstat->bytes_in_flight;
   cc_ack.rtt = UINT64_MAX;
@@ -959,7 +993,7 @@ ngtcp2_ssize ngtcp2_rtb_recv_ack(ngtcp2_rtb *rtb, const ngtcp2_ack *fr,
     return 0;
   }
 
-  min_ack = largest_ack - (int64_t)fr->first_ack_blklen;
+  min_ack = largest_ack - (int64_t)fr->first_ack_range;
 
   for (; !ngtcp2_ksl_it_end(&it);) {
     pkt_num = *(int64_t *)ngtcp2_ksl_it_key(&it);
@@ -984,9 +1018,9 @@ ngtcp2_ssize ngtcp2_rtb_recv_ack(ngtcp2_rtb *rtb, const ngtcp2_ack *fr,
     ++num_acked;
   }
 
-  for (i = 0; i < fr->num_blks;) {
-    largest_ack = min_ack - (int64_t)fr->blks[i].gap - 2;
-    min_ack = largest_ack - (int64_t)fr->blks[i].blklen;
+  for (i = 0; i < fr->rangecnt;) {
+    largest_ack = min_ack - (int64_t)fr->ranges[i].gap - 2;
+    min_ack = largest_ack - (int64_t)fr->ranges[i].len;
 
     it = ngtcp2_ksl_lower_bound(&rtb->ents, &largest_ack);
     if (ngtcp2_ksl_it_end(&it)) {
@@ -1065,7 +1099,7 @@ ngtcp2_ssize ngtcp2_rtb_recv_ack(ngtcp2_rtb *rtb, const ngtcp2_ack *fr,
   }
 
   if (rtb->cc->on_spurious_congestion && num_lost_pkts &&
-      rtb->num_lost_pkts == 0) {
+      rtb->num_lost_pkts - rtb->num_lost_pmtud_pkts == 0) {
     rtb->cc->on_spurious_congestion(cc, cstat, ts);
   }
 
@@ -1096,11 +1130,11 @@ fail:
 }
 
 static int rtb_pkt_lost(ngtcp2_rtb *rtb, ngtcp2_conn_stat *cstat,
-                        const ngtcp2_rtb_entry *ent, uint64_t loss_delay,
-                        ngtcp2_tstamp lost_send_time, size_t pkt_thres) {
+                        const ngtcp2_rtb_entry *ent, ngtcp2_duration loss_delay,
+                        size_t pkt_thres, ngtcp2_tstamp ts) {
   ngtcp2_tstamp loss_time;
 
-  if (ent->ts <= lost_send_time ||
+  if (ent->ts + loss_delay <= ts ||
       rtb->largest_acked_tx_pkt_num >= ent->hd.pkt_num + (int64_t)pkt_thres) {
     return 1;
   }
@@ -1149,7 +1183,6 @@ static int rtb_detect_lost_pkt(ngtcp2_rtb *rtb, uint64_t *ppkt_lost,
                                ngtcp2_conn_stat *cstat, ngtcp2_tstamp ts) {
   ngtcp2_rtb_entry *ent;
   ngtcp2_duration loss_delay;
-  ngtcp2_tstamp lost_send_time;
   ngtcp2_ksl_it it;
   ngtcp2_tstamp latest_ts, oldest_ts;
   int64_t last_lost_pkt_num;
@@ -1157,18 +1190,17 @@ static int rtb_detect_lost_pkt(ngtcp2_rtb *rtb, uint64_t *ppkt_lost,
   ngtcp2_cc *cc = rtb->cc;
   int rv;
   uint64_t pkt_thres =
-      rtb->cc_bytes_in_flight / cstat->max_udp_payload_size / 2;
+      rtb->cc_bytes_in_flight / cstat->max_tx_udp_payload_size / 2;
   size_t ecn_pkt_lost = 0;
   ngtcp2_tstamp start_ts;
   ngtcp2_duration pto = ngtcp2_conn_compute_pto(conn, pktns);
-  uint64_t prior_bytes_in_flight = cstat->bytes_in_flight;
+  uint64_t bytes_lost = 0;
   ngtcp2_duration max_ack_delay;
 
   pkt_thres = ngtcp2_max(pkt_thres, NGTCP2_PKT_THRESHOLD);
   pkt_thres = ngtcp2_min(pkt_thres, 256);
   cstat->loss_time[rtb->pktns_id] = UINT64_MAX;
   loss_delay = compute_pkt_loss_delay(cstat);
-  lost_send_time = ts - loss_delay;
 
   it = ngtcp2_ksl_lower_bound(&rtb->ents, &rtb->largest_acked_tx_pkt_num);
   for (; !ngtcp2_ksl_it_end(&it); ngtcp2_ksl_it_next(&it)) {
@@ -1178,8 +1210,7 @@ static int rtb_detect_lost_pkt(ngtcp2_rtb *rtb, uint64_t *ppkt_lost,
       break;
     }
 
-    if (rtb_pkt_lost(rtb, cstat, ent, loss_delay, lost_send_time,
-                     (size_t)pkt_thres)) {
+    if (rtb_pkt_lost(rtb, cstat, ent, loss_delay, (size_t)pkt_thres, ts)) {
       /* All entries from ent are considered to be lost. */
       latest_ts = oldest_ts = ent->ts;
       last_lost_pkt_num = ent->hd.pkt_num;
@@ -1220,11 +1251,17 @@ static int rtb_detect_lost_pkt(ngtcp2_rtb *rtb, uint64_t *ppkt_lost,
           ++ecn_pkt_lost;
         }
 
-        rtb_on_remove(rtb, ent, cstat);
+        bytes_lost += rtb_on_remove(rtb, ent, cstat);
         rv = rtb_on_pkt_lost(rtb, &it, ent, cstat, conn, pktns, ts);
         if (rv != 0) {
           return rv;
         }
+      }
+
+      /* If only PMTUD packets are lost, do not trigger congestion
+         event. */
+      if (bytes_lost == 0) {
+        break;
       }
 
       switch (conn->tx.ecn.state) {
@@ -1287,9 +1324,7 @@ static int rtb_detect_lost_pkt(ngtcp2_rtb *rtb, uint64_t *ppkt_lost,
   ngtcp2_rtb_remove_excessive_lost_pkt(rtb, (size_t)pkt_thres);
 
   if (ppkt_lost) {
-    assert(prior_bytes_in_flight >= cstat->bytes_in_flight);
-
-    *ppkt_lost = prior_bytes_in_flight - cstat->bytes_in_flight;
+    *ppkt_lost = bytes_lost;
   }
 
   return 0;
@@ -1319,6 +1354,11 @@ void ngtcp2_rtb_remove_excessive_lost_pkt(ngtcp2_rtb *rtb, size_t n) {
                     "removing stale lost pkn=%" PRId64, ent->hd.pkt_num);
 
     --rtb->num_lost_pkts;
+
+    if (ent->flags & NGTCP2_RTB_ENTRY_FLAG_PMTUD_PROBE) {
+      --rtb->num_lost_pmtud_pkts;
+    }
+
     rv = ngtcp2_ksl_remove_hint(&rtb->ents, &it, &it, &ent->hd.pkt_num);
     assert(0 == rv);
     ngtcp2_rtb_entry_objalloc_del(ent, rtb->rtb_entry_objalloc,
@@ -1354,6 +1394,11 @@ void ngtcp2_rtb_remove_expired_lost_pkt(ngtcp2_rtb *rtb, ngtcp2_duration pto,
                     "removing stale lost pkn=%" PRId64, ent->hd.pkt_num);
 
     --rtb->num_lost_pkts;
+
+    if (ent->flags & NGTCP2_RTB_ENTRY_FLAG_PMTUD_PROBE) {
+      --rtb->num_lost_pmtud_pkts;
+    }
+
     rv = ngtcp2_ksl_remove_hint(&rtb->ents, &it, &it, &ent->hd.pkt_num);
     assert(0 == rv);
     ngtcp2_rtb_entry_objalloc_del(ent, rtb->rtb_entry_objalloc,
@@ -1418,6 +1463,10 @@ static int rtb_on_pkt_lost_resched_move(ngtcp2_rtb *rtb, ngtcp2_conn *conn,
 
   if (ent->flags & NGTCP2_RTB_ENTRY_FLAG_LOST_RETRANSMITTED) {
     --rtb->num_lost_pkts;
+
+    if (ent->flags & NGTCP2_RTB_ENTRY_FLAG_PMTUD_PROBE) {
+      --rtb->num_lost_pmtud_pkts;
+    }
 
     ngtcp2_log_info(rtb->log, NGTCP2_LOG_EVENT_RCV,
                     "pkn=%" PRId64
@@ -1596,7 +1645,8 @@ ngtcp2_ssize ngtcp2_rtb_reclaim_on_pto(ngtcp2_rtb *rtb, ngtcp2_conn *conn,
 
     assert(ent->frc);
 
-    reclaimed = rtb_reclaim_frame(rtb, conn, pktns, ent);
+    reclaimed =
+        rtb_reclaim_frame(rtb, NGTCP2_RECLAIM_FLAG_NONE, conn, pktns, ent);
     if (reclaimed < 0) {
       return reclaimed;
     }
