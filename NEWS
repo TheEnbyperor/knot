@@ -1,3 +1,65 @@
+Knot DNS 3.2.3 (2022-11-20)
+===========================
+
+Improvements:
+-------------
+ - knotd: new per-zone DS push configuration option (see 'zone.ds-push')
+ - libs: upgraded embedded libngtcp2 to 0.11.0
+
+Bugfixes:
+---------
+ - knsupdate: program crashes when sending an update
+ - knotd: server drops more responses over UDP under higher load
+ - knotd: missing EDNS padding in responses over QUIC
+ - knotd: some memory issues when handling unusual QUIC traffic
+ - kxdpgun: broken IPv4 source subnet processing
+ - kdig: incorrect handling of unsent data over QUIC
+
+Knot DNS 3.2.2 (2022-11-01)
+===========================
+
+Features:
+---------
+ - knotd,kxdpgun: support for VLAN (802.1Q) traffic in the XDP mode
+ - knotd: added configurable delay upon D-Bus initialization (see 'server.dbus-init-delay')
+ - kdig: support for JSON (RFC 8427) output format (see '+json')
+ - kdig: support for PROXYv2 (see '+proxy') (Gift for Peter van Dijk)
+
+Improvements:
+-------------
+ - mod-geoip: module respects the server configuration of answer rotation
+ - libs: upgraded embedded libngtcp2 to 0.10.0
+ - tests: improved robustness of some unit tests
+ - doc: added description of zone bootstrap re-planning
+
+Bugfixes:
+---------
+ - knotd: catalog confusion when a member is added and immediately deleted #818
+ - knotd: defective handling of short messages with PROXYv2 header #816
+ - knotd: inconsistent processing of malformed messages with PROXYv2 header #817
+ - kxdpgun: incorrect XDP mode is logged
+ - packaging: outdated dependency check in RPM packages
+
+Knot DNS 3.2.1 (2022-09-09)
+===========================
+
+Improvements:
+-------------
+ - libknot: added compatibility with libbpf 1.0 and libxdp
+ - libknot: removed some trailing white space characters from textual RR format
+ - libs: upgraded embedded libngtcp2 to 0.8.1
+
+Bugfixes:
+---------
+ - knotd: some non-DNS packets not passed to OS if XDP mode enabled
+ - knotd: inappropriate log about QUIC port change if QUIC not enabled
+ - knotd/kxdpgun: various memory leaks related to QUIC and TCP
+ - kxdpgun: can crash at high rates in emulated XDP mode
+ - tests: broken XDP-TCP test on 32-bit platforms
+ - kdig: failed to build with enabled QUIC on OpenBSD
+ - systemd: failed to start server due to TemporaryFileSystem setting
+ - packaging: missing knot-dnssecutils package on CentOS 7
+
 Knot DNS 3.2.0 (2022-08-22)
 ===========================
 
