@@ -1,4 +1,4 @@
-/*  Copyright (C) 2022 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2023 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -208,7 +208,8 @@ int knot_ctl_bind(knot_ctl_t *ctx, const char *path)
 	}
 
 	// Bind the socket.
-	ctx->listen_sock = net_bound_socket(SOCK_STREAM, &addr, 0);
+	mode_t mode = S_IWUSR | S_IWGRP;
+	ctx->listen_sock = net_bound_socket(SOCK_STREAM, &addr, 0, mode);
 	if (ctx->listen_sock < 0) {
 		return ctx->listen_sock;
 	}

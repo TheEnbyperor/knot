@@ -39,31 +39,31 @@ For the description of configuration items, we have to declare a meaning of
 the following symbols:
 .INDENT 0.0
 .IP \(bu 2
-\fIINT\fP – Integer
+\fBINT\fP – Integer
 .IP \(bu 2
-\fISTR\fP – Textual string
+\fBSTR\fP – Textual string
 .IP \(bu 2
-\fIHEXSTR\fP – Hexadecimal string (with \fB0x\fP prefix)
+\fBHEXSTR\fP – Hexadecimal string (with \fB0x\fP prefix)
 .IP \(bu 2
-\fIBOOL\fP – Boolean value (\fBon\fP/\fBoff\fP or \fBtrue\fP/\fBfalse\fP)
+\fBBOOL\fP – Boolean value (\fBon\fP/\fBoff\fP or \fBtrue\fP/\fBfalse\fP)
 .IP \(bu 2
-\fITIME\fP – Number of seconds, an integer with possible time multiplier suffix
+\fBTIME\fP – Number of seconds, an integer with possible time multiplier suffix
 (\fBs\fP ~ 1, \fBm\fP ~ 60, \fBh\fP ~ 3600 or \fBd\fP ~ 24 * 3600)
 .IP \(bu 2
-\fISIZE\fP – Number of bytes, an integer with possible size multiplier suffix
+\fBSIZE\fP – Number of bytes, an integer with possible size multiplier suffix
 (\fBB\fP ~ 1, \fBK\fP ~ 1024, \fBM\fP ~ 1024^2 or \fBG\fP ~ 1024^3)
 .IP \(bu 2
-\fIBASE64\fP – Base64 encoded string
+\fBBASE64\fP – Base64 encoded string
 .IP \(bu 2
-\fIADDR\fP – IPv4 or IPv6 address
+\fBADDR\fP – IPv4 or IPv6 address
 .IP \(bu 2
-\fIDNAME\fP – Domain name
+\fBDNAME\fP – Domain name
 .IP \(bu 2
-\&... – Multi\-valued item, order of the values is preserved
+\fB\&...\fP – Multi\-valued item, order of the values is preserved
 .IP \(bu 2
-[ ] – Optional value
+\fB[\fP \fB]\fP – Optional value
 .IP \(bu 2
-| – Choice
+\fB|\fP – Choice
 .UNINDENT
 .sp
 The configuration consists of several fixed sections and optional module
@@ -109,13 +109,10 @@ A comment begins with a \fB#\fP character and is ignored during processing.
 Also each configuration section or sequence block allows a permanent
 comment using the \fBcomment\fP item which is stored in the server beside the
 configuration.
-.SH INCLUDES
+.SH INCLUDING CONFIGURATION
 .sp
 Another configuration file or files, matching a pattern, can be included at
-the top level in the current file. If the path is not absolute, then it
-is considered to be relative to the current file. The pattern can be
-an arbitrary string meeting POSIX \fIglob\fP requirements, e.g. dir/*.conf.
-Matching files are processed in sorted order.
+the top level in the current file.
 .INDENT 0.0
 .INDENT 3.5
 .sp
@@ -126,6 +123,15 @@ include: STR
 .fi
 .UNINDENT
 .UNINDENT
+.SS include
+.sp
+A path or a matching pattern specifying one or more files that are included
+at the place of the include option position in the configuration.
+If the path is not absolute, then it is considered to be relative to the
+current file. The pattern can be an arbitrary string meeting POSIX \fIglob\fP
+requirements, e.g. dir/*.conf. Matching files are processed in sorted order.
+.sp
+\fIDefault:\fP not set
 .SH MODULE SECTION
 .sp
 Dynamic modules loading configuration.
@@ -787,7 +793,7 @@ Maximum time (in seconds) the control socket operations can take.
 Set to 0 for infinity.
 .sp
 \fIDefault:\fP \fB5\fP
-.SH LOGGING SECTION
+.SH LOG SECTION
 .sp
 Server can be configured to log to the standard output, standard error
 output, syslog (or systemd journal if systemd is enabled) or into an arbitrary
@@ -867,7 +873,7 @@ Minimum severity level for messages related to zones to be logged.
 Minimum severity level for all message types to be logged.
 .sp
 \fIDefault:\fP not set
-.SH STATISTICS SECTION
+.SH STATS SECTION
 .sp
 Periodic server statistics dumping.
 .INDENT 0.0
@@ -1295,14 +1301,14 @@ An ACL rule identifier.
 .SS address
 .sp
 An ordered list of IP addresses, network subnets, or network ranges. The query\(aqs
-source address must match one of them. Empty value means that address match is not
+source address must match one of them. If this item is not set, address match is not
 required.
 .sp
 \fIDefault:\fP not set
 .SS key
 .sp
 An ordered list of \fI\%reference\fPs to TSIG keys. The query must
-match one of them. Empty value means that transaction authentication is not used.
+match one of them. If this item is not set, transaction authentication is not used.
 .sp
 \fIDefault:\fP not set
 .SS remote
@@ -1844,7 +1850,7 @@ more records depending on the keys available.
 .INDENT 0.0
 .INDENT 3.5
 The \fBdouble\-ds\fP value does not trigger double\-DS roll\-over method. That method is
-only suppored by Knot when performed manually, with unset \fI\%ksk\-submission\fP\&.
+only supported when performed manually, with unset \fI\%ksk\-submission\fP\&.
 .UNINDENT
 .UNINDENT
 .sp
@@ -1944,6 +1950,14 @@ template:
 .fi
 .UNINDENT
 .UNINDENT
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+If an item is explicitly specified both in the referenced template and
+the zone, the template item value is overridden by the zone item value.
+.UNINDENT
+.UNINDENT
 .SS id
 .sp
 A template identifier.
@@ -1977,6 +1991,7 @@ zone:
     ddns\-master: remote_id
     notify: remote_id | remotes_id ...
     acl: acl_id ...
+    provide\-ixfr: BOOL
     semantic\-checks: BOOL | soft
     zonefile\-sync: TIME
     zonefile\-load: none | difference | difference\-no\-serial | whole
@@ -2080,6 +2095,12 @@ An ordered list of \fI\%references\fP to ACL rules which can allow
 or disallow zone transfers, updates or incoming notifies.
 .sp
 \fIDefault:\fP not set
+.SS provide\-ixfr
+.sp
+If disabled, the server is forced to respond with AXFR to IXFR queries.
+If enabled, IXFR requests are responded normally.
+.sp
+\fIDefault:\fP \fBon\fP
 .SS semantic\-checks
 .sp
 Selects if extra zone semantic checks are used or impacts of the mandatory checks.
@@ -2488,6 +2509,6 @@ An ordered list of references to query modules in the form of \fImodule_name\fP 
 .SH AUTHOR
 CZ.NIC Labs <https://www.knot-dns.cz>
 .SH COPYRIGHT
-Copyright 2010–2022, CZ.NIC, z.s.p.o.
+Copyright 2010–2023, CZ.NIC, z.s.p.o.
 .\" Generated by docutils manpage writer.
 .

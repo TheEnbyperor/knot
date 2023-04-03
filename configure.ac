@@ -2,7 +2,7 @@ AC_PREREQ([2.69])
 
 m4_define([knot_VERSION_MAJOR], 3)dnl
 m4_define([knot_VERSION_MINOR], 2)dnl
-m4_define([knot_VERSION_PATCH], 3)dnl Leave empty if the master branch!
+m4_define([knot_VERSION_PATCH], 5)dnl Leave empty if the master branch!
 m4_include([m4/knot-version.m4])
 
 AC_INIT([knot], [knot_PKG_VERSION], [knot-dns@labs.nic.cz])
@@ -567,12 +567,12 @@ AS_IF([test "$enable_daemon" = "yes" -o "$enable_utilities" = "yes"], [
 
 # QUIC support
 AC_ARG_ENABLE([quic],
-   AS_HELP_STRING([--enable-quic=auto|yes|no], [Support DoQ (needs libngtcp2 >= 0.10.0, gnutls >= 3.7.2) [default=auto]]),
+   AS_HELP_STRING([--enable-quic=auto|yes|no], [Support DoQ (needs libngtcp2 >= 0.13.0, gnutls >= 3.7.2) [default=auto]]),
    [], [enable_quic=auto])
 
 AS_CASE([$enable_quic],
-   [auto], [PKG_CHECK_MODULES([libngtcp2], [libngtcp2 >= 0.10.0 libngtcp2_crypto_gnutls], [enable_quic=yes], [enable_quic=no])],
-   [yes], [PKG_CHECK_MODULES([libngtcp2], [libngtcp2 >= 0.10.0 libngtcp2_crypto_gnutls], [enable_quic=yes],
+   [auto], [PKG_CHECK_MODULES([libngtcp2], [libngtcp2 >= 0.13.0 libngtcp2_crypto_gnutls], [enable_quic=yes], [enable_quic=no])],
+   [yes], [PKG_CHECK_MODULES([libngtcp2], [libngtcp2 >= 0.13.0 libngtcp2_crypto_gnutls], [enable_quic=yes],
              AS_IF([test "$gnutls_quic" = "yes"],
                 [enable_quic=embedded
                  embedded_libngtcp2_CFLAGS="-I\$(top_srcdir)/src/contrib/libngtcp2 -I\$(top_srcdir)/src/contrib/libngtcp2/ngtcp2/lib"
@@ -714,7 +714,7 @@ LIBS="$save_LIBS"
 
 # Checks for header files.
 AC_HEADER_RESOLV
-AC_CHECK_HEADERS_ONCE([pthread_np.h sys/uio.h bsd/string.h])
+AC_CHECK_HEADERS_ONCE([pthread_np.h stdatomic.h sys/uio.h bsd/string.h])
 
 # Checks for optional library functions.
 AC_CHECK_FUNCS([accept4 clock_gettime fgetln getline initgroups malloc_trim \
@@ -770,16 +770,12 @@ AM_CONDITIONAL([OSS_FUZZ], [test "$with_oss_fuzz" != "no"])
 
 AS_IF([test "$enable_documentation" = "yes"],[
 
-AC_PATH_PROGS([SPHINXBUILD], [sphinx-build sphinx-build-3], [false])
+AC_PATH_PROG([SPHINXBUILD], [sphinx-build], [false])
 AS_IF([test "$SPHINXBUILD" = "false"],
-  [AC_MSG_WARN([Could not find the 'sphinx-build' executable, you will be unable to regenerate documentation.])],
-  [AC_PATH_PROG([PDFLATEX], [pdflatex], [false])
-   AS_IF([test "$PDFLATEX" = ""],
-     [AC_MSG_WARN([Could not find the 'pdflatex' executable, you will be unable to generate PDF documentation.])])
-   AC_PATH_PROG([MAKEINFO], [makeinfo], [false])
-   AS_IF([test "$MAKEINFO" = "false"],
-     [AC_MSG_WARN([Could not find the 'makeinfo' executable, you will be unable to generate info documentation.])])
-  ])
+  [AC_MSG_WARN([missing 'sphinx-build' executable for documentation generation])]
+)
+AC_PATH_PROG([PDFLATEX], [pdflatex], [false])
+AC_PATH_PROG([MAKEINFO], [makeinfo], [false])
 
 ])
 

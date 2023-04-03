@@ -446,6 +446,7 @@ static int zone_refresh(zone_t *zone, _unused_ ctl_args_t *args)
 		return KNOT_ENOTSUP;
 	}
 
+	zone->zonefile.bootstrap_cnt = 0; // restart delays
 	return schedule_trigger(zone, args, ZONE_EVENT_REFRESH, true);
 }
 
@@ -457,6 +458,7 @@ static int zone_retransfer(zone_t *zone, _unused_ ctl_args_t *args)
 	}
 
 	zone_set_flag(zone, ZONE_FORCE_AXFR);
+	zone->zonefile.bootstrap_cnt = 0; // restart delays
 	return schedule_trigger(zone, args, ZONE_EVENT_REFRESH, true);
 }
 
@@ -1839,7 +1841,7 @@ static int ctl_server(ctl_args_t *args, ctl_cmd_t cmd)
 		ret = KNOT_CTL_ESTOP;
 		break;
 	case CTL_RELOAD:
-		ret = server_reload(args->server);
+		ret = server_reload(args->server, RELOAD_FULL);
 		if (ret != KNOT_EOK) {
 			send_error(args, knot_strerror(ret));
 		}
@@ -2059,7 +2061,7 @@ static int ctl_conf_txn(ctl_args_t *args, ctl_cmd_t cmd)
 			break;
 		}
 
-		ret = server_reload(args->server);
+		ret = server_reload(args->server, RELOAD_COMMIT);
 		break;
 	default:
 		assert(0);

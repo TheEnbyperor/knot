@@ -19,11 +19,12 @@ DAEMON=/usr/sbin/$NAME # Introduce the server's location here
 PIDFILE=/run/knot/knot.pid
 SCRIPTNAME=/etc/init.d/knot
 KNOTC=/usr/sbin/knotc
+RUNDIR=/run/knot
 
 # Exit if the package is not installed
 [ -x $DAEMON ] || exit 0
 
-KNOTD_ARGS="-c /etc/knot/knot.conf"
+KNOTD_ARGS=""
 
 # Read configuration variable file if it is present
 [ -r /etc/default/knot ] && . /etc/default/knot
@@ -31,7 +32,7 @@ KNOTD_ARGS="-c /etc/knot/knot.conf"
 DAEMON_ARGS="-d $KNOTD_ARGS"
 
 # Define LSB log_* functions.
-# Depend on lsb-base (>= 3.0-6) to ensure that this file is present.
+# Depend on sysvinit-utils (>= 2.96) to ensure that this file is present.
 . /lib/lsb/init-functions
 
 #
@@ -82,35 +83,15 @@ do_reload() {
     return $?
 }
 
-do_tmpfiles() {
-    local type path mode user group age argument
-    if [ -r "$1" ]; then
-	if [ -x /bin/systemd-tmpfiles ]; then
-	    /bin/systemd-tmpfiles --create "$1"
-	else
-	    while read type path mode user group age argument; do
-		case "$type" in
-		    d)
-			mkdir -p "$path";
-			chmod "$mode" "$path";
-			chown "$user:$group" "$path";
-			;;
-		    \#*)
-			;;
-		    *)
-			log_warning_msg "tmpfile.d type '$type' is not supported yet"
-			;;
-		esac
-	    done < "$1"
-	fi
-    else
-	log_warning_msg "tmpfiles.d file '$1' doesn't exist or is not readable"
-    fi
+do_mkrundir() {
+    mkdir -p $RUNDIR
+    chmod 0755 $RUNDIR
+    chown knot:knot $RUNDIR
 }
 
 case "$1" in
     start)
-	do_tmpfiles /usr/lib/tmpfiles.d/knot.conf
+	do_mkrundir
 	log_daemon_msg "Starting $DESC " "$NAME"
 	do_start
 	case "$?" in

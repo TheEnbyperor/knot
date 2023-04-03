@@ -36,6 +36,7 @@
 #include "ngtcp2_macro.h"
 #include "ngtcp2_conv.h"
 #include "ngtcp2_unreachable.h"
+#include "ngtcp2_net.h"
 
 void ngtcp2_log_init(ngtcp2_log *log, const ngtcp2_cid *scid,
                      ngtcp2_printf log_printf, ngtcp2_tstamp ts,
@@ -139,7 +140,7 @@ static const char *strerrorcode(uint64_t error_code) {
     return "CRYPTO_BUFFER_EXCEEDED";
   case NGTCP2_KEY_UPDATE_ERROR:
     return "KEY_UPDATE_ERROR";
-  case NGTCP2_VERSION_NEGOTIATION_ERROR_DRAFT:
+  case NGTCP2_VERSION_NEGOTIATION_ERROR:
     return "VERSION_NEGOTIATION_ERROR";
   default:
     if (0x100u <= error_code && error_code <= 0x1ffu) {
@@ -428,16 +429,16 @@ static void log_fr_new_token(ngtcp2_log *log, const ngtcp2_pkt_hd *hd,
   uint8_t buf[128 + 1 + 1];
   uint8_t *p;
 
-  if (fr->token.len > 64) {
-    p = ngtcp2_encode_hex(buf, fr->token.base, 64);
+  if (fr->tokenlen > 64) {
+    p = ngtcp2_encode_hex(buf, fr->token, 64);
     p[128] = '*';
     p[129] = '\0';
   } else {
-    p = ngtcp2_encode_hex(buf, fr->token.base, fr->token.len);
+    p = ngtcp2_encode_hex(buf, fr->token, fr->tokenlen);
   }
   log->log_printf(
       log->user_data, (NGTCP2_LOG_PKT " NEW_TOKEN(0x%02x) token=0x%s len=%zu"),
-      NGTCP2_LOG_FRM_HD_FIELDS(dir), fr->type, (const char *)p, fr->token.len);
+      NGTCP2_LOG_FRM_HD_FIELDS(dir), fr->type, (const char *)p, fr->tokenlen);
 }
 
 static void log_fr_retire_connection_id(ngtcp2_log *log,
@@ -599,6 +600,10 @@ void ngtcp2_log_remote_tp(ngtcp2_log *log, uint8_t exttype,
   uint8_t addr[16 * 2 + 7 + 1];
   uint8_t cid[NGTCP2_MAX_CIDLEN * 2 + 1];
   size_t i;
+  const ngtcp2_sockaddr_in *sa_in;
+  const ngtcp2_sockaddr_in6 *sa_in6;
+  const uint8_t *p;
+  uint32_t version;
 
   if (!log->log_printf) {
     return;
@@ -615,23 +620,31 @@ void ngtcp2_log_remote_tp(ngtcp2_log *log, uint8_t exttype,
     }
 
     if (params->preferred_address_present) {
-      log->log_printf(log->user_data,
-                      (NGTCP2_LOG_TP " preferred_address.ipv4_addr=%s"),
-                      NGTCP2_LOG_TP_HD_FIELDS,
-                      (const char *)ngtcp2_encode_ipv4(
-                          addr, params->preferred_address.ipv4_addr));
-      log->log_printf(
-          log->user_data, (NGTCP2_LOG_TP " preferred_address.ipv4_port=%u"),
-          NGTCP2_LOG_TP_HD_FIELDS, params->preferred_address.ipv4_port);
+      if (params->preferred_address.ipv4_present) {
+        sa_in = &params->preferred_address.ipv4;
 
-      log->log_printf(log->user_data,
-                      (NGTCP2_LOG_TP " preferred_address.ipv6_addr=%s"),
-                      NGTCP2_LOG_TP_HD_FIELDS,
-                      (const char *)ngtcp2_encode_ipv6(
-                          addr, params->preferred_address.ipv6_addr));
-      log->log_printf(
-          log->user_data, (NGTCP2_LOG_TP " preferred_address.ipv6_port=%u"),
-          NGTCP2_LOG_TP_HD_FIELDS, params->preferred_address.ipv6_port);
+        log->log_printf(log->user_data,
+                        (NGTCP2_LOG_TP " preferred_address.ipv4_addr=%s"),
+                        NGTCP2_LOG_TP_HD_FIELDS,
+                        (const char *)ngtcp2_encode_ipv4(
+                            addr, (const uint8_t *)&sa_in->sin_addr));
+        log->log_printf(log->user_data,
+                        (NGTCP2_LOG_TP " preferred_address.ipv4_port=%u"),
+                        NGTCP2_LOG_TP_HD_FIELDS, ngtcp2_ntohs(sa_in->sin_port));
+      }
+
+      if (params->preferred_address.ipv6_present) {
+        sa_in6 = &params->preferred_address.ipv6;
+
+        log->log_printf(log->user_data,
+                        (NGTCP2_LOG_TP " preferred_address.ipv6_addr=%s"),
+                        NGTCP2_LOG_TP_HD_FIELDS,
+                        (const char *)ngtcp2_encode_ipv6(
+                            addr, (const uint8_t *)&sa_in6->sin6_addr));
+        log->log_printf(
+            log->user_data, (NGTCP2_LOG_TP " preferred_address.ipv6_port=%u"),
+            NGTCP2_LOG_TP_HD_FIELDS, ngtcp2_ntohs(sa_in6->sin6_port));
+      }
 
       log->log_printf(log->user_data,
                       (NGTCP2_LOG_TP " preferred_address.cid=0x%s"),
@@ -719,15 +732,17 @@ void ngtcp2_log_remote_tp(ngtcp2_log *log, uint8_t exttype,
         (NGTCP2_LOG_TP " version_information.chosen_version=0x%08x"),
         NGTCP2_LOG_TP_HD_FIELDS, params->version_info.chosen_version);
 
-    assert(!(params->version_info.other_versionslen & 0x3));
+    assert(!(params->version_info.available_versionslen & 0x3));
 
-    for (i = 0; i < params->version_info.other_versionslen;
+    for (i = 0, p = params->version_info.available_versions;
+         i < params->version_info.available_versionslen;
          i += sizeof(uint32_t)) {
+      p = ngtcp2_get_uint32(&version, p);
+
       log->log_printf(
           log->user_data,
-          (NGTCP2_LOG_TP " version_information.other_versions[%zu]=0x%08x"),
-          NGTCP2_LOG_TP_HD_FIELDS, i >> 2,
-          ngtcp2_get_uint32(&params->version_info.other_versions[i]));
+          (NGTCP2_LOG_TP " version_information.available_versions[%zu]=0x%08x"),
+          NGTCP2_LOG_TP_HD_FIELDS, i >> 2, version);
     }
   }
 }

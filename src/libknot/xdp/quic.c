@@ -1,4 +1,4 @@
-/*  Copyright (C) 2022 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2023 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -778,13 +778,13 @@ int knot_xquic_handle(knot_xquic_table_t *table, knot_xdp_msg_t *msg, uint64_t i
 		}
 
 		assert(header.type == NGTCP2_PKT_INITIAL);
-		if (header.token.len == 0 && xquic_require_retry(table)) {
+		if (header.tokenlen == 0 && xquic_require_retry(table)) {
 			return -XQUIC_SEND_RETRY;
 		}
 
-		if (header.token.len > 0) {
+		if (header.tokenlen > 0) {
 			ret = ngtcp2_crypto_verify_retry_token(
-				&odcid, header.token.base, header.token.len,
+				&odcid, header.token, header.tokenlen,
 				(const uint8_t *)table->hash_secret, sizeof(table->hash_secret), header.version,
 				(const struct sockaddr *)&msg->ip_from, addr_len(&msg->ip_from),
 				&dcid, idle_timeout, now // NOTE setting retry token validity to idle_timeout for simplicity
@@ -808,7 +808,7 @@ int knot_xquic_handle(knot_xquic_table_t *table, knot_xdp_msg_t *msg, uint64_t i
 		xquic_conn_mark_used(xconn, table, now);
 
 		ret = conn_new(&xconn->conn, &path, &dcid, &scid, &odcid, decoded_cids.version, now,
-		               table->udp_payload_limit, idle_timeout, xconn, true, header.token.len > 0);
+		               table->udp_payload_limit, idle_timeout, xconn, true, header.tokenlen > 0);
 		if (ret >= 0) {
 			ret = tls_init_conn_session(xconn, true);
 		}
@@ -825,9 +825,8 @@ int knot_xquic_handle(knot_xquic_table_t *table, knot_xdp_msg_t *msg, uint64_t i
 	*out_conn = xconn;
 	if (ret == NGTCP2_ERR_DRAINING // received CONNECTION_CLOSE from the counterpart
 	    || ngtcp2_err_is_fatal(ret)) { // connection doomed
-
 		knot_xquic_table_rem(xconn, table);
-		return KNOT_EOK;
+		return KNOT_ECONN;
 	} else if (ret != NGTCP2_NO_ERROR) { // non-fatal error, discard packet
 		return KNOT_EOK;
 	}

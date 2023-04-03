@@ -1,4 +1,4 @@
-/*  Copyright (C) 2022 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2023 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -373,6 +373,8 @@ static iface_t *server_init_iface(struct sockaddr_storage *addr,
 		return NULL;
 	}
 
+	const mode_t unix_mode = S_IWUSR | S_IWGRP | S_IWOTH;
+
 	bool warn_bind = true;
 	bool warn_cbpf = true;
 	bool warn_bufsize = true;
@@ -381,10 +383,10 @@ static iface_t *server_init_iface(struct sockaddr_storage *addr,
 
 	/* Create bound UDP sockets. */
 	for (int i = 0; i < udp_socket_count; i++) {
-		int sock = net_bound_socket(SOCK_DGRAM, addr, udp_bind_flags);
+		int sock = net_bound_socket(SOCK_DGRAM, addr, udp_bind_flags, unix_mode);
 		if (sock == KNOT_EADDRNOTAVAIL) {
 			udp_bind_flags |= NET_BIND_NONLOCAL;
-			sock = net_bound_socket(SOCK_DGRAM, addr, udp_bind_flags);
+			sock = net_bound_socket(SOCK_DGRAM, addr, udp_bind_flags, unix_mode);
 			if (sock >= 0 && warn_bind) {
 				log_warning("address %s UDP bound, but required nonlocal bind", addr_str);
 				warn_bind = false;
@@ -436,10 +438,10 @@ static iface_t *server_init_iface(struct sockaddr_storage *addr,
 
 	/* Create bound TCP sockets. */
 	for (int i = 0; i < tcp_socket_count; i++) {
-		int sock = net_bound_socket(SOCK_STREAM, addr, tcp_bind_flags);
+		int sock = net_bound_socket(SOCK_STREAM, addr, tcp_bind_flags, unix_mode);
 		if (sock == KNOT_EADDRNOTAVAIL) {
 			tcp_bind_flags |= NET_BIND_NONLOCAL;
-			sock = net_bound_socket(SOCK_STREAM, addr, tcp_bind_flags);
+			sock = net_bound_socket(SOCK_STREAM, addr, tcp_bind_flags, unix_mode);
 			if (sock >= 0 && warn_bind) {
 				log_warning("address %s TCP bound, but required nonlocal bind", addr_str);
 				warn_bind = false;
@@ -1047,7 +1049,7 @@ static void warn_server_reconfigure(conf_t *conf, server_t *server)
 	}
 }
 
-int server_reload(server_t *server)
+int server_reload(server_t *server, reload_t mode)
 {
 	if (server == NULL) {
 		return KNOT_EINVAL;
@@ -1109,7 +1111,7 @@ int server_reload(server_t *server)
 		stats_reconfigure(conf(), server);
 	}
 	if (full || (flags & (CONF_IO_FRLD_ZONES | CONF_IO_FRLD_ZONE))) {
-		server_update_zones(conf(), server);
+		server_update_zones(conf(), server, mode);
 	}
 
 	/* Free old config needed for module unload in zone reload. */
@@ -1303,7 +1305,7 @@ int server_reconfigure(conf_t *conf, server_t *server)
 	return KNOT_EOK;
 }
 
-void server_update_zones(conf_t *conf, server_t *server)
+void server_update_zones(conf_t *conf, server_t *server, reload_t mode)
 {
 	if (conf == NULL || server == NULL) {
 		return;
@@ -1319,7 +1321,7 @@ void server_update_zones(conf_t *conf, server_t *server)
 	worker_pool_wait(server->workers);
 
 	/* Reload zone database and free old zones. */
-	zonedb_reload(conf, server);
+	zonedb_reload(conf, server, mode);
 
 	/* Trim extra heap. */
 	mem_trim();

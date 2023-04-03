@@ -1,4 +1,4 @@
-/*  Copyright (C) 2020 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2023 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -155,6 +155,10 @@ void *sockaddr_raw(const struct sockaddr_storage *ss, size_t *addr_size)
 		struct sockaddr_in6 *ipv6 = (struct sockaddr_in6 *)ss;
 		*addr_size = sizeof(ipv6->sin6_addr);
 		return &ipv6->sin6_addr;
+	} else if (ss->ss_family == AF_UNIX) {
+		struct sockaddr_un *un = (struct sockaddr_un *)ss;
+		*addr_size = sizeof(un->sun_path);
+		return un->sun_path;
 	} else {
 		return NULL;
 	}
@@ -172,11 +176,13 @@ int sockaddr_set_raw(struct sockaddr_storage *ss, int family,
 
 	size_t ss_size = 0;
 	void *ss_data = sockaddr_raw(ss, &ss_size);
-	if (ss_data == NULL || ss_size != raw_addr_size) {
+	if (ss_data == NULL ||
+	    (family != AF_UNIX && ss_size != raw_addr_size) ||
+	    (family == AF_UNIX && ss_size <= raw_addr_size)) {
 		return KNOT_EINVAL;
 	}
 
-	memcpy(ss_data, raw_addr, ss_size);
+	memcpy(ss_data, raw_addr, raw_addr_size);
 
 	return KNOT_EOK;
 }
@@ -198,9 +204,11 @@ int sockaddr_tostr(char *buf, size_t maxlen, const struct sockaddr_storage *ss)
 		out = inet_ntop(ss->ss_family, &s->sin_addr, buf, maxlen);
 	} else if (ss->ss_family == AF_UNIX) {
 		const struct sockaddr_un *s = (const struct sockaddr_un *)ss;
-		size_t ret = strlcpy(buf, s->sun_path, maxlen);
+		const char *path = (s->sun_path[0] != '\0' ? s->sun_path : "UNIX socket");
+		size_t ret = strlcpy(buf, path, maxlen);
 		out = (ret < maxlen) ? buf : NULL;
 	} else {
+		*buf = '\0';
 		return KNOT_EINVAL;
 	}
 

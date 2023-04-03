@@ -1,4 +1,4 @@
-/*  Copyright (C) 2022 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2023 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -247,6 +247,10 @@ static int answer_edns_init(const knot_pkt_t *query, knot_pkt_t *resp,
 	case AF_INET6:
 		max_payload = conf()->cache.srv_udp_max_payload_ipv6;
 		break;
+	case AF_UNIX:
+		max_payload = MIN(conf()->cache.srv_udp_max_payload_ipv4,
+		                  conf()->cache.srv_udp_max_payload_ipv6);
+		break;
 	default:
 		return KNOT_ERROR;
 	}
@@ -352,9 +356,9 @@ static int answer_edns_put(knot_pkt_t *resp, knotd_qdata_t *qdata)
 		}
 	}
 
-	/* Add EXPIRE if space. */
+	/* Add EXPIRE if space and not catalog zone, which cannot expire. */
 	if (knot_pkt_edns_option(qdata->query, KNOT_EDNS_OPTION_EXPIRE) != NULL &&
-	    qdata->extra->contents != NULL) {
+	    qdata->extra->contents != NULL && !qdata->extra->zone->is_catalog_flag) {
 		int64_t timer = qdata->extra->zone->timers.next_expire == 0
 		              ? zone_soa_expire(qdata->extra->zone)
 		              : qdata->extra->zone->timers.next_expire - time(NULL);
