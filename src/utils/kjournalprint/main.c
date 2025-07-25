@@ -1,4 +1,4 @@
-/*  Copyright (C) 2022 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2023 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -31,6 +31,7 @@
 #include "contrib/color.h"
 #include "contrib/strtonum.h"
 #include "contrib/string.h"
+#include "contrib/time.h"
 
 #define PROGRAM_NAME	"kjournalprint"
 
@@ -71,21 +72,26 @@ typedef struct {
 	size_t changes;
 } print_params_t;
 
-static void print_changeset(const changeset_t *chs, print_params_t *params)
+static void print_changeset(const changeset_t *chs, uint64_t timestamp, print_params_t *params)
 {
+	char time_buf[64] = { 0 };
+	(void)knot_time_print(TIME_PRINT_UNIX, timestamp, time_buf, sizeof(time_buf));
+
 	static size_t count = 1;
 	if (chs->soa_from == NULL) {
-		printf("%s;; Zone-in-journal, serial: %u, changeset: %zu%s\n",
+		printf("%s;; Zone-in-journal, serial: %u, changeset: %zu, timestamp: %s%s\n",
 		       COL_YELW(params->color),
 		       knot_soa_serial(chs->soa_to->rrs.rdata),
 		       count++,
+		       time_buf,
 		       COL_RST(params->color));
 	} else {
-		printf("%s;; Changes between zone versions: %u -> %u, changeset: %zu%s\n",
+		printf("%s;; Changes between zone versions: %u -> %u, changeset: %zu, timestamp: %s%s\n",
 		       COL_YELW(params->color),
 		       knot_soa_serial(chs->soa_from->rrs.rdata),
 		       knot_soa_serial(chs->soa_to->rrs.rdata),
 		       count++,
+		       time_buf,
 		       COL_RST(params->color));
 	}
 	changeset_print(chs, stdout, params->color);
@@ -124,8 +130,11 @@ static int rrtypelist_callback(zone_node_t *node, void *data)
 	return KNOT_EOK;
 }
 
-static void print_changeset_debugmode(const changeset_t *chs)
+static void print_changeset_debugmode(const changeset_t *chs, uint64_t timestamp)
 {
+	char time_buf[64] = { 0 };
+	(void)knot_time_print(TIME_PRINT_HUMAN_MIXED, timestamp, time_buf, sizeof(time_buf));
+
 	// detect all types
 	rrtype_dynarray_t types = { 0 };
 	size_t count_minus = 1, count_plus = 1; // 1 for SOA which is always present but not iterated
@@ -136,11 +145,11 @@ static void print_changeset_debugmode(const changeset_t *chs)
 	(void)zone_contents_nsec3_apply(chs->add, rrtypelist_callback, &ctx_plus);
 
 	if (chs->soa_from == NULL) {
-		printf("Zone-in-journal %u  +++: %zu\t size: %zu\t", knot_soa_serial(chs->soa_to->rrs.rdata),
-		       count_plus, changeset_serialized_size(chs));
+		printf("Zone-in-journal %u  +++: %zu\t size: %zu\t timestamp: %s\t", knot_soa_serial(chs->soa_to->rrs.rdata),
+		       count_plus, changeset_serialized_size(chs), time_buf);
 	} else {
-		printf("%u -> %u  ---: %zu\t  +++: %zu\t size: %zu\t", knot_soa_serial(chs->soa_from->rrs.rdata),
-		       knot_soa_serial(chs->soa_to->rrs.rdata), count_minus, count_plus, changeset_serialized_size(chs));
+		printf("%u -> %u  ---: %zu\t  +++: %zu\t size: %zu\t timestamp: %s\t", knot_soa_serial(chs->soa_from->rrs.rdata),
+		       knot_soa_serial(chs->soa_to->rrs.rdata), count_minus, count_plus, changeset_serialized_size(chs), time_buf);
 	}
 
 	char temp[100];
@@ -151,7 +160,7 @@ static void print_changeset_debugmode(const changeset_t *chs)
 	printf("\n");
 }
 
-static int count_changeset_cb(_unused_ bool special, const changeset_t *ch, void *ctx)
+static int count_changeset_cb(_unused_ bool special, const changeset_t *ch, _unused_ uint64_t timestamp, void *ctx)
 {
 	print_params_t *params = ctx;
 	if (ch != NULL) {
@@ -160,15 +169,15 @@ static int count_changeset_cb(_unused_ bool special, const changeset_t *ch, void
 	return KNOT_EOK;
 }
 
-static int print_changeset_cb(bool special, const changeset_t *ch, void *ctx)
+static int print_changeset_cb(bool special, const changeset_t *ch, uint64_t timestamp, void *ctx)
 {
 	print_params_t *params = ctx;
 	if (ch != NULL && params->counter++ >= params->limit) {
 		if (params->debug) {
-			print_changeset_debugmode(ch);
+			print_changeset_debugmode(ch, timestamp);
 			params->changes++;
 		} else {
-			print_changeset(ch, params);
+			print_changeset(ch, timestamp, params);
 		}
 		if (special && params->debug) {
 			printf("---------------------------------------------\n");
@@ -259,15 +268,18 @@ static int list_zone(const knot_dname_t *zone, bool detailed, knot_lmdb_db_t *jd
 
 	if (detailed) {
 		zone_journal_t j = { jdb, zone };
-		bool exists;
+		uint32_t first_serial = 0, last_serial = 0;
+		bool exists = false, zij = false;
 		uint64_t occupied;
 
-		int ret = journal_info(j, &exists, NULL, NULL, NULL, NULL, NULL, &occupied, occupied_all);
+		int ret = journal_info(j, &exists, &first_serial, &zij, &last_serial,
+		                       NULL, NULL, &occupied, occupied_all);
 		if (ret != KNOT_EOK) {
 			return ret;
 		}
 		assert(exists);
-		printf("%s \t%"PRIu64" KiB\n", zone_str, occupied / 1024);
+		printf("%-28s     %8"PRIu64"     %10u    %10u         %3s\n",
+		       zone_str, occupied / 1024, first_serial, last_serial, zij ? "yes" : "no");
 	} else {
 		printf("%s\n", zone_str);
 	}
@@ -283,11 +295,15 @@ int list_zones(char *path, bool detailed)
 	init_list(&zones);
 	ptrnode_t *zone;
 	uint64_t occupied_all = 0;
+	bool first = detailed;
 
 	int ret = journals_walk(&jdb, add_zone_to_list, &zones);
 	WALK_LIST(zone, zones) {
 		if (ret != KNOT_EOK) {
 			break;
+		} else if (first) {
+			printf(";; <zone name>              <occupied KiB> <first serial> <last serial> <full zone>\n");
+			first = false;
 		}
 		ret = list_zone(zone->d, detailed, &jdb, &occupied_all);
 	}
@@ -296,7 +312,7 @@ int list_zones(char *path, bool detailed)
 	ptrlist_deep_free(&zones, NULL);
 
 	if (detailed && ret == KNOT_EOK) {
-		printf("Occupied all zones together: %"PRIu64" KiB\n", occupied_all / 1024);
+		printf(";; Occupied all zones together: %"PRIu64" KiB\n", occupied_all / 1024);
 	}
 	return ret;
 }

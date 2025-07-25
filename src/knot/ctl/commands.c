@@ -266,13 +266,15 @@ static int zone_status(zone_t *zone, ctl_args_t *args)
 	if (MATCH_OR_FILTER(args, CTL_FILTER_STATUS_SERIAL)) {
 		data[KNOT_CTL_IDX_TYPE] = "serial";
 
-		if (empty) {
+		rcu_read_lock();
+		if (zone->contents == NULL) {
 			ret = snprintf(buff, sizeof(buff), STATUS_EMPTY);
 		} else {
 			knot_rdataset_t *soa = node_rdataset(zone->contents->apex,
 			                                     KNOT_RRTYPE_SOA);
 			ret = snprintf(buff, sizeof(buff), "%u", knot_soa_serial(soa->rdata));
 		}
+		rcu_read_unlock();
 		if (ret < 0 || ret >= sizeof(buff)) {
 			return KNOT_ESPACE;
 		}
@@ -981,26 +983,31 @@ static int zone_read(zone_t *zone, ctl_args_t *args)
 		return ret;
 	}
 
+	rcu_read_lock();
+	zone_contents_t *contents = zone->contents;
 	if (args->data[KNOT_CTL_IDX_OWNER] != NULL) {
 		knot_dname_storage_t owner;
 
 		ret = get_owner(owner, sizeof(owner), zone->name, args);
 		if (ret != KNOT_EOK) {
+			rcu_read_unlock();
 			return ret;
 		}
 
-		const zone_node_t *node = zone_contents_node_or_nsec3(zone->contents, owner);
+		const zone_node_t *node = zone_contents_node_or_nsec3(contents, owner);
 		if (node == NULL) {
+			rcu_read_unlock();
 			return KNOT_ENONODE;
 		}
 
 		ret = send_node((zone_node_t *)node, ctx);
-	} else if (zone->contents != NULL) {
-		ret = zone_contents_apply(zone->contents, send_node, ctx);
+	} else if (contents != NULL) {
+		ret = zone_contents_apply(contents, send_node, ctx);
 		if (ret == KNOT_EOK) {
-			ret = zone_contents_nsec3_apply(zone->contents, send_node, ctx);
+			ret = zone_contents_nsec3_apply(contents, send_node, ctx);
 		}
 	}
+	rcu_read_unlock();
 
 	return ret;
 }
@@ -1341,14 +1348,12 @@ static int purge_orphan_member_cb(const knot_dname_t *member, const knot_dname_t
 
 	const char *err_str = NULL;
 
-	rcu_read_lock();
 	zone_t *cat_z = knot_zonedb_find(server->zone_db, catz);
 	if (cat_z == NULL) {
 		err_str = "existing";
 	} else if (!cat_z->is_catalog_flag) {
 		err_str = "catalog";
 	}
-	rcu_read_unlock();
 
 	if (err_str == NULL) {
 		return KNOT_EOK;

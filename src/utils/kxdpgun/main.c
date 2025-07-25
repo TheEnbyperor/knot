@@ -197,30 +197,30 @@ static size_t collect_stats(kxdpgun_stats_t *into, const kxdpgun_stats_t *what)
 	return res;
 }
 
-static void print_stats(kxdpgun_stats_t *st, bool tcp, bool quic, bool recv)
+static void print_stats(kxdpgun_stats_t *st, bool tcp, bool quic, bool recv, uint64_t qps)
 {
 	pthread_mutex_lock(&st->mutex);
 
 #define ps(counter)  ((counter) * 1000 / (st->duration / 1000))
-#define pct(counter) ((counter) * 100 / st->qry_sent)
+#define pct(counter) ((counter) * 100.0 / st->qry_sent)
 
 	const char *name = tcp ? "SYNs:    " : quic ? "initials:" : "queries: ";
-	printf("total %s    %"PRIu64" (%"PRIu64" pps)\n", name,
-	       st->qry_sent, ps(st->qry_sent));
+	printf("total %s    %"PRIu64" (%"PRIu64" pps) (%f%%)\n", name,
+	       st->qry_sent, ps(st->qry_sent), 100.0 * st->qry_sent / (st->duration / 1000000.0 * qps));
 	if (st->qry_sent > 0 && recv) {
 		if (tcp || quic) {
 		name = tcp ? "established:" : "handshakes: ";
-		printf("total %s %"PRIu64" (%"PRIu64" pps) (%"PRIu64"%%)\n", name,
+		printf("total %s %"PRIu64" (%"PRIu64" pps) (%f%%)\n", name,
 		       st->synack_recv, ps(st->synack_recv), pct(st->synack_recv));
 		}
-		printf("total replies:     %"PRIu64" (%"PRIu64" pps) (%"PRIu64"%%)\n",
+		printf("total replies:     %"PRIu64" (%"PRIu64" pps) (%f%%)\n",
 		       st->ans_recv, ps(st->ans_recv), pct(st->ans_recv));
 		if (tcp) {
-		printf("total closed:      %"PRIu64" (%"PRIu64" pps) (%"PRIu64"%%)\n",
+		printf("total closed:      %"PRIu64" (%"PRIu64" pps) (%f%%)\n",
 		       st->finack_recv, ps(st->finack_recv), pct(st->finack_recv));
 		}
 		if (st->rst_recv > 0) {
-		printf("total reset:       %"PRIu64" (%"PRIu64" pps) (%"PRIu64"%%)\n",
+		printf("total reset:       %"PRIu64" (%"PRIu64" pps) (%f%%)\n",
 		       st->rst_recv, ps(st->rst_recv), pct(st->rst_recv));
 		}
 		printf("average DNS reply size: %"PRIu64" B\n",
@@ -764,7 +764,8 @@ void *xdp_gun_thread(void *_ctx)
 			assert(collected <= ctx->n_threads);
 			if (collected == ctx->n_threads) {
 				print_stats(&global_stats, ctx->tcp, ctx->quic,
-				            !(ctx->flags & KNOT_XDP_FILTER_DROP));
+				            !(ctx->flags & KNOT_XDP_FILTER_DROP),
+					    ctx->qps * ctx->n_threads);
 				clear_stats(&global_stats);
 			}
 		}
@@ -1064,7 +1065,7 @@ static bool get_opts(int argc, char *argv[], xdp_gun_ctx_t *ctx)
 	int opt = 0, arg;
 	bool default_at_once = true;
 	double argf;
-	char *argcp, *local_ip = NULL;
+	char *argcp, *local_ip = NULL, *filename = NULL;
 	while ((opt = getopt_long(argc, argv, "hVt:Q:b:rp:T::U::F:I:l:i:L:R:v:", opts, NULL)) != -1) {
 		switch (opt) {
 		case 'h':
@@ -1168,9 +1169,7 @@ static bool get_opts(int argc, char *argv[], xdp_gun_ctx_t *ctx)
 			local_ip = optarg;
 			break;
 		case 'i':
-			if (!load_queries(optarg, ctx->edns_size, ctx->msgid)) {
-				return false;
-			}
+			filename = optarg;
 			break;
 		case 'L':
 			if (mac_sscan(optarg, ctx->local_mac) != KNOT_EOK) {
@@ -1199,6 +1198,14 @@ static bool get_opts(int argc, char *argv[], xdp_gun_ctx_t *ctx)
 			print_help();
 			return false;
 		}
+	}
+	if (filename == NULL) {
+		print_help();
+		return false;
+	}
+	size_t qcount = ctx->duration / 1000000 * ctx->qps;
+	if (!load_queries(filename, ctx->edns_size, ctx->msgid, qcount)) {
+		return false;
 	}
 	if (global_payloads == NULL || argc - optind != 1) {
 		print_help();
@@ -1289,7 +1296,7 @@ int main(int argc, char *argv[])
 		pthread_join(threads[i], NULL);
 	}
 	if (global_stats.duration > 0 && global_stats.qry_sent > 0) {
-		print_stats(&global_stats, ctx.tcp, ctx.quic, !(ctx.flags & KNOT_XDP_FILTER_DROP));
+		print_stats(&global_stats, ctx.tcp, ctx.quic, !(ctx.flags & KNOT_XDP_FILTER_DROP), ctx.qps * ctx.n_threads);
 	}
 	pthread_mutex_destroy(&global_stats.mutex);
 

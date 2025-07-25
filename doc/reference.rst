@@ -96,7 +96,7 @@ requirements, e.g. dir/\*.conf. Matching files are processed in sorted order.
 Dynamic modules loading configuration.
 
 .. NOTE::
-   If configured with non-empty ```--with-moduledir=path``` parameter, all
+   If configured with non-empty ``--with-moduledir=path`` parameter, all
    shared modules in this directory will be automatically loaded.
 
 ::
@@ -589,8 +589,11 @@ the interface name is ``cz.nic.knotd.events``.
 Possible values:
 
 - ``none`` – No signal is emitted.
-- ``running`` – The signal ``started`` is emitted when the server is fully operational
-  and the signal ``stopped`` is emitted at the beginning of the server shutdown.
+- ``running`` – There are two possible signals emitted:
+
+  - ``started`` when the server is started and all configured zones (including
+    catalog zones and their members) are loaded or successfully bootstrapped.
+  - ``stopped`` when the server shutdown sequence is initiated.
 - ``zone-updated`` – The signal ``zone_updated`` is emitted when a zone has been updated;
   the signal parameters are `zone name` and `zone SOA serial`.
 - ``ksk-submission`` – The signal ``zone_ksk_submission`` is emitted if there is
@@ -2196,6 +2199,7 @@ Definition of zones served by the server.
      journal-content: none | changes | all
      journal-max-usage: SIZE
      journal-max-depth: INT
+     ixfr-by-one: BOOL
      zone-max-size : SIZE
      adjust-threads: INT
      dnssec-signing: BOOL
@@ -2451,6 +2455,22 @@ Maximum history length of the journal.
 *Minimum:* ``2``
 
 *Default:* ``20``
+
+.. _zone_ixfr-by-one:
+
+ixfr-by-one
+-----------
+
+Within incoming IXFR, process only one changeset at a time, not multiple together.
+This preserves the complete history in the journal and prevents the merging of
+changesets when multiple changesets are IXFRed simultaneously. However, this does not
+prevent the merging (or deletion) of old changesets in the journal to save space,
+as described in :ref:`journal behaviour <Journal behaviour>`.
+
+This option leads to increased server load when processing IXFR, including
+network traffic.
+
+*Default:* ``off``
 
 .. _zone_zone-max-size:
 

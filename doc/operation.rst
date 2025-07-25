@@ -221,9 +221,9 @@ To start a writing transaction on all zones or on specific zones::
     $ knotc zone-begin --
     $ knotc zone-begin example.com example.net
 
-Now you can list all nodes within the transaction using the ```zone-get```
+Now you can list all nodes within the transaction using the ``zone-get``
 command, which always returns current data with all changes included. The
-command has the same syntax as ```zone-read```.
+command has the same syntax as ``zone-read``.
 
 Within the transaction, you can add a record to a specific zone or to all
 zones with an open transaction::
@@ -253,9 +253,10 @@ A full example of setting up a completely new zone from scratch::
     $ knotc conf-set zone.domain example.com
     $ knotc conf-commit
     $ knotc zone-begin example.com
-    $ knotc zone-set example.com @ 7200 SOA ns hostmaster 1 86400 900 691200 3600
-    $ knotc zone-set example.com ns 3600 A 192.168.0.1
-    $ knotc zone-set example.com www 3600 A 192.168.0.100
+    $ knotc zone-set example.com  @ 3600 SOA  ns admin 1 86400 900 691200 3600
+    $ knotc zone-set example.com  @ 3600 NS   ns
+    $ knotc zone-set example.com ns 3600 A    192.168.0.1
+    $ knotc zone-set example.com ns 3600 AAAA 2001:DB8::1
     $ knotc zone-commit example.com
 
 .. NOTE::
@@ -447,9 +448,9 @@ In each attempt, the retry interval is subject to :ref:`zone_retry-min-interval`
 and :ref:`zone_retry-max-interval`.
 
 Until the refresh has been successfully completed, the backoff is restarted from
-the beginning by every ```zone-refresh``` or ```zone-retransfer``` of the zone
-triggered manually via :doc:`knotc<man_knotc>`, by ```zone-purge``` or
-```zone-restore``` of the zone's timers, or by a restart of :doc:`knotd<man_knotd>`.
+the beginning by every ``zone-refresh`` or ``zone-retransfer`` of the zone
+triggered manually via :doc:`knotc<man_knotc>`, by ``zone-purge`` or
+``zone-restore`` of the zone's timers, or by a restart of :doc:`knotd<man_knotd>`.
 
 .. _Zone expiration:
 
@@ -727,6 +728,8 @@ Further rollovers::
        if "KEY_SUBMISSION" in k:
          print("%s, zone=%s, keytag=%s" % (k["__REALTIME_TIMESTAMP"], k["ZONE"], k["KEY_SUBMISSION"]))
      '
+
+   Alternatively, the :ref:`D-Bus signaling<server_dbus-event>` can be utilized for the same use.
 
 .. _DNSSEC Shared KSK:
 
@@ -1026,6 +1029,10 @@ the backup work is done and a simple result status is printed out.
    backup, such as the backup creation date & time, the server identity, etc.
    Care must always be taken **not to remove this file** from the backup nor to
    damage it.
+
+If a backup fails, the backup directory containing incomplete backup is retained.
+For repeated backup attempts to the same directory, it must be removed or renamed
+manually first.
 
 Offline restore
 ---------------

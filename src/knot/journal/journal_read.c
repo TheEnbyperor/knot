@@ -1,4 +1,4 @@
-/*  Copyright (C) 2021 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2023 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -31,7 +31,10 @@ struct journal_read {
 	MDB_val key_prefix;
 	const knot_dname_t *zone;
 	wire_ctx_t wire;
+	uint64_t timestamp;
 	uint32_t next;
+	uint32_t changesets_read;
+	uint32_t changesets_total;
 };
 
 int journal_read_get_error(const journal_read_t *ctx, int another_error)
@@ -56,7 +59,12 @@ static bool go_next_changeset(journal_read_t *ctx, bool go_zone, const knot_dnam
 		ctx->txn.ret = KNOT_ELOOP;
 		return false;
 	}
+	if (++ctx->changesets_read > ctx->changesets_total) {
+		ctx->txn.ret = KNOT_ELOOP;
+		return false;
+	}
 	ctx->next = journal_next_serial(&ctx->txn.cur_val);
+	ctx->timestamp = journal_ch_timestamp(&ctx->txn.cur_val);
 	update_ctx_wire(ctx);
 	return true;
 }
@@ -77,6 +85,10 @@ int journal_read_begin(zone_journal_t j, bool read_zone, uint32_t serial_from, j
 	newctx->next = serial_from;
 
 	knot_lmdb_begin(j.db, &newctx->txn, false);
+
+	journal_metadata_t md = { 0 };
+	journal_load_metadata(&newctx->txn, newctx->zone, &md);
+	newctx->changesets_total = md.changeset_count + (read_zone ? 1 : 0);
 
 	if (go_next_changeset(newctx, read_zone, j.zone)) {
 		*ctx = newctx;
@@ -271,11 +283,10 @@ int journal_walk_from(zone_journal_t j, uint32_t from,
 		return ret;
 	}
 
-	if ((md.flags & JOURNAL_SERIAL_TO_VALID) && from != md.serial_to &&
-	    ret == KNOT_EOK) {
+	if ((md.flags & JOURNAL_SERIAL_TO_VALID) && ret == KNOT_EOK) {
 		ret = journal_read_begin(j, false, from, &read);
 		while (ret == KNOT_EOK && journal_read_changeset(read, &ch)) {
-			ret = cb(false, &ch, ctx);
+			ret = cb(false, &ch, read->timestamp, ctx);
 			at_least_one = true;
 			journal_read_clear_changeset(&ch);
 		}
@@ -283,7 +294,7 @@ int journal_walk_from(zone_journal_t j, uint32_t from,
 		journal_read_end(read);
 	}
 	if (!at_least_one && ret == KNOT_EOK) {
-		ret = cb(false, NULL, ctx);
+		ret = cb(false, NULL, 0, ctx);
 	}
 	return ret;
 }
@@ -293,9 +304,9 @@ int journal_walk(zone_journal_t j, journal_walk_cb_t cb, void *ctx)
 {
 	int ret = knot_lmdb_exists(j.db);
 	if (ret == KNOT_ENODB) {
-		ret = cb(true, NULL, ctx);
+		ret = cb(true, NULL, 0, ctx);
 		if (ret == KNOT_EOK) {
-			ret = cb(false, NULL, ctx);
+			ret = cb(false, NULL, 0, ctx);
 		}
 		return ret;
 	} else if (ret == KNOT_EOK) {
@@ -319,18 +330,21 @@ int journal_walk(zone_journal_t j, journal_walk_cb_t cb, void *ctx)
 		ret = journal_read_begin(j, false, md.merged_serial, &read);
 read_one_special:
 		if (ret == KNOT_EOK && journal_read_changeset(read, &ch)) {
-			ret = cb(true, &ch, ctx);
+			ret = cb(true, &ch, read->timestamp, ctx);
 			journal_read_clear_changeset(&ch);
 		}
 		ret = journal_read_get_error(read, ret);
 		journal_read_end(read);
 		read = NULL;
 	} else {
-		ret = cb(true, NULL, ctx);
+		ret = cb(true, NULL, 0, ctx);
 	}
 
 	if (ret == KNOT_EOK) {
 		ret = journal_walk_from(j, md.first_serial, cb, ctx);
+		if (ret == KNOT_ENOENT && zone_in_j) {
+			ret = KNOT_EOK; // solo zone-in-journal
+		}
 	}
 	return ret;
 }
@@ -346,7 +360,7 @@ typedef struct {
 	bool last_serial_valid;
 } check_ctx_t;
 
-static int check_cb(bool special, const changeset_t *ch, void *vctx)
+static int check_cb(bool special, const changeset_t *ch, _unused_ uint64_t timestamp, void *vctx)
 {
 	check_ctx_t *ctx = vctx;
 	if (special && ch != NULL) {
