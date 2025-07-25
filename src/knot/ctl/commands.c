@@ -46,11 +46,11 @@
 #include "contrib/ucw/lists.h"
 #include "libzscanner/scanner.h"
 
-#define MATCH_OR_FILTER(args, code) ((args)->data[KNOT_CTL_IDX_FILTER] == NULL || \
-                                     strchr((args)->data[KNOT_CTL_IDX_FILTER], (code)) != NULL)
+#define MATCH_OR_FILTER(args, code) ((args)->data[KNOT_CTL_IDX_FILTERS] == NULL || \
+                                     strchr((args)->data[KNOT_CTL_IDX_FILTERS], (code)[0]) != NULL)
 
-#define MATCH_AND_FILTER(args, code) ((args)->data[KNOT_CTL_IDX_FILTER] != NULL && \
-                                      strchr((args)->data[KNOT_CTL_IDX_FILTER], (code)) != NULL)
+#define MATCH_AND_FILTER(args, code) ((args)->data[KNOT_CTL_IDX_FILTERS] != NULL && \
+                                      strchr((args)->data[KNOT_CTL_IDX_FILTERS], (code)[0]) != NULL)
 
 typedef struct {
 	ctl_args_t *args;
@@ -99,7 +99,7 @@ static bool allow_blocking_while_ctl_txn(zone_event_type_t event)
  * \return false if there is a filter conflict, true otherwise.
  */
 static bool eval_opposite_filters(ctl_args_t *args, bool *param, bool dflt,
-                                  int filter, int neg_filter)
+                                  char *filter, char *neg_filter)
 {
 	bool set = MATCH_AND_FILTER(args, filter);
 	bool unset = MATCH_AND_FILTER(args, neg_filter);
@@ -256,23 +256,23 @@ static int zone_status(zone_t *zone, ctl_args_t *args)
 		return KNOT_EINVAL;
 	}
 
-	char flags[16] = "";
+	char filters[16] = "";
 	knot_ctl_data_t data = {
 		[KNOT_CTL_IDX_ZONE] = name,
-		[KNOT_CTL_IDX_FLAGS] = flags
+		[KNOT_CTL_IDX_FILTERS] = filters,
 	};
 
 	const bool slave = zone_is_slave(conf(), zone);
 	if (slave) {
-		strlcat(flags, CTL_FLAG_STATUS_SLAVE, sizeof(flags));
+		strlcat(filters, CTL_FILTER_STATUS_SLAVE_R, sizeof(filters));
 	}
 	const bool empty = (zone->contents == NULL);
 	if (empty) {
-		strlcat(flags, CTL_FLAG_STATUS_EMPTY, sizeof(flags));
+		strlcat(filters, CTL_FILTER_STATUS_EMPTY_R, sizeof(filters));
 	}
 	const bool member = (zone->flags & ZONE_IS_CAT_MEMBER);
 	if (member) {
-		strlcat(flags, CTL_FLAG_STATUS_MEMBER, sizeof(flags));
+		strlcat(filters, CTL_FILTER_STATUS_MEMBER_R, sizeof(filters));
 	}
 
 	int ret;
@@ -432,19 +432,31 @@ static int zone_status(zone_t *zone, ctl_args_t *args)
 
 			data[KNOT_CTL_IDX_TYPE] = zone_events_get_name(i);
 			time_t ev_time = zone_events_get_time(zone, i);
-			if (zone->events.running && zone->events.type == i) {
-				ret = snprintf(buff, sizeof(buff), "running");
+			time_t running = zone->events.running;
+
+			knot_time_print_t format = TIME_PRINT_HUMAN_MIXED;
+			if (ctl_has_flag(args->data[KNOT_CTL_IDX_FLAGS],
+					 CTL_FILTER_STATUS_UNIXTIME)) {
+				format = TIME_PRINT_UNIX;
+			}
+
+			if (running && zone->events.type == i) {
+				char val_str[16];
+				ret = knot_time_print(format, running, val_str, sizeof(val_str));
+				if (ret == 0) {
+					ret = snprintf(buff, sizeof(buff), "running(%s)", val_str);
+				}
 			} else if (ev_time <= 0) {
 				ret = snprintf(buff, sizeof(buff), STATUS_EMPTY);
 			} else if (ev_time <= time(NULL)) {
 				bool frozen = ufrozen && ufreeze_applies(i);
-				ret = snprintf(buff, sizeof(buff), frozen ? "frozen" : "pending");
-			} else {
-				knot_time_print_t format = TIME_PRINT_HUMAN_MIXED;
-				if (ctl_has_flag(args->data[KNOT_CTL_IDX_FLAGS],
-				                 CTL_FLAG_STATUS_UNIXTIME)) {
-					format = TIME_PRINT_UNIX;
+				char val_str[16];
+				ret = knot_time_print(format, ev_time, val_str, sizeof(val_str));
+				if (ret == 0) {
+					ret = snprintf(buff, sizeof(buff), "%s(%s)",
+					               frozen ? "frozen" : "pending", val_str);
 				}
+			} else {
 				ret = knot_time_print(format, ev_time, buff, sizeof(buff));
 			}
 			if (ret < 0 || ret >= sizeof(buff)) {
@@ -585,7 +597,7 @@ static int init_backup(ctl_args_t *args, bool restore_mode)
 	knot_backup_params_t dflts = restore_mode ? BACKUP_PARAM_DFLT_R : BACKUP_PARAM_DFLT_B;
 
 	// Filter '+keysonly' silently changes all defaults to '+no...'.
-	dflts = MATCH_AND_FILTER(args, BACKUP_PARAM_KEYSONLY) ? BACKUP_PARAM_EMPTY : dflts;
+	dflts = MATCH_AND_FILTER(args, CTL_FILTER_BACKUP_KEYSONLY) ? BACKUP_PARAM_EMPTY : dflts;
 
 	for (const backup_filter_list_t *item = backup_filters; item->name != NULL; item++) {
 		if (!eval_backup_filters(args, &filters, item, dflts)) {
@@ -879,7 +891,8 @@ static int zone_txn_begin_l(zone_t *zone, _unused_ ctl_args_t *args)
 	}
 
 	zone_update_flags_t type = (zone->contents == NULL) ? UPDATE_FULL : UPDATE_INCREMENTAL;
-	int ret = zone_update_init(zone->control_update, zone, type | UPDATE_STRICT);
+	zone_update_flags_t strict = (MATCH_AND_FILTER(args, CTL_FILTER_BEGIN_BENEVOLENT)) ? 0 : UPDATE_STRICT;
+	int ret = zone_update_init(zone->control_update, zone, type | strict);
 	if (ret != KNOT_EOK) {
 		free(zone->control_update);
 		zone->control_update = NULL;
@@ -1213,7 +1226,7 @@ static int zone_txn_get(zone_t *zone, ctl_args_t *args)
 
 static int send_changeset_part(changeset_t *ch, send_ctx_t *ctx, bool from)
 {
-	ctx->data[KNOT_CTL_IDX_FLAGS] = from ? CTL_FLAG_DIFF_REM : CTL_FLAG_DIFF_ADD;
+	ctx->data[KNOT_CTL_IDX_FILTERS] = from ? CTL_FILTER_DIFF_REM_R : CTL_FILTER_DIFF_ADD_R;
 
 	// Send SOA only if explicitly changed.
 	if (ch->soa_to != NULL) {
@@ -1280,7 +1293,7 @@ static int zone_txn_diff_l(zone_t *zone, ctl_args_t *args)
 
 	// FULL update has no changeset to print, do a 'get' instead.
 	if (zone->control_update->flags & UPDATE_FULL) {
-		return zone_flag_txn_get(zone, args, CTL_FLAG_DIFF_ADD);
+		return zone_flag_txn_get(zone, args, CTL_FILTER_DIFF_ADD_R);
 	}
 
 	send_ctx_t *ctx = &ctl_globals[args->thread_idx].send_ctx;
@@ -1625,8 +1638,8 @@ static void log_if_orphans_error(knot_dname_t *zone_name, int err, char *db_type
 
 static int orphans_purge(ctl_args_t *args)
 {
-	assert(args->data[KNOT_CTL_IDX_FILTER] != NULL);
-	bool only_orphan = (strlen(args->data[KNOT_CTL_IDX_FILTER]) == 1);
+	assert(args->data[KNOT_CTL_IDX_FILTERS] != NULL);
+	bool only_orphan = (strlen(args->data[KNOT_CTL_IDX_FILTERS]) == 1);
 	int ret;
 	bool failed = false;
 
@@ -2088,8 +2101,8 @@ static int send_block(conf_io_t *io)
 
 	// Get the item prefix.
 	switch (io->type) {
-	case NEW: data[KNOT_CTL_IDX_FLAGS] = CTL_FLAG_DIFF_ADD; break;
-	case OLD: data[KNOT_CTL_IDX_FLAGS] = CTL_FLAG_DIFF_REM; break;
+	case NEW: data[KNOT_CTL_IDX_FILTERS] = CTL_FILTER_DIFF_ADD_R; break;
+	case OLD: data[KNOT_CTL_IDX_FILTERS] = CTL_FILTER_DIFF_REM_R; break;
 	default: break;
 	}
 
@@ -2201,14 +2214,14 @@ static int ctl_conf_list(ctl_args_t *args, ctl_cmd_t cmd)
 	int ret = KNOT_EOK;
 
 	while (true) {
-		const char *key0  = args->data[KNOT_CTL_IDX_SECTION];
-		const char *key1  = args->data[KNOT_CTL_IDX_ITEM];
-		const char *id    = args->data[KNOT_CTL_IDX_ID];
-		const char *flags = args->data[KNOT_CTL_IDX_FLAGS];
+		const char *key0    = args->data[KNOT_CTL_IDX_SECTION];
+		const char *key1    = args->data[KNOT_CTL_IDX_ITEM];
+		const char *id      = args->data[KNOT_CTL_IDX_ID];
+		const char *filters = args->data[KNOT_CTL_IDX_FILTERS];
 
-		bool schema = ctl_has_flag(flags, CTL_FLAG_LIST_SCHEMA);
-		bool current = !ctl_has_flag(flags, CTL_FLAG_LIST_TXN);
-		bool zones = ctl_has_flag(flags, CTL_FLAG_LIST_ZONES);
+		bool schema = ctl_has_flag(filters, CTL_FILTER_LIST_SCHEMA);
+		bool current = !ctl_has_flag(filters, CTL_FILTER_LIST_TXN);
+		bool zones = ctl_has_flag(filters, CTL_FILTER_LIST_ZONES);
 
 		if (zones) {
 			ret = list_zones(args->server->zone_db, args->ctl);

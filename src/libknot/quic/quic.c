@@ -45,10 +45,6 @@
 #define SERVER_DEFAULT_SCIDLEN 18
 #define QUIC_REGULAR_TOKEN_TIMEOUT (24 * 3600 * 1000000000LLU)
 
-#define QUIC_DEFAULT_VERSION "-VERS-ALL:+VERS-TLS1.3"
-#define QUIC_DEFAULT_GROUPS  "-GROUP-ALL:+GROUP-X25519:+GROUP-SECP256R1:+GROUP-SECP384R1:+GROUP-SECP521R1"
-#define QUIC_PRIORITIES      "%DISABLE_TLS13_COMPAT_MODE:NORMAL:"QUIC_DEFAULT_VERSION":"QUIC_DEFAULT_GROUPS
-
 #define QUIC_SEND_VERSION_NEGOTIATION    NGTCP2_ERR_VERSION_NEGOTIATION
 #define QUIC_SEND_RETRY                  NGTCP2_ERR_RETRY
 #define QUIC_SEND_STATELESS_RESET        (-NGTCP2_STATELESS_RESET_TOKENLEN)
@@ -57,12 +53,12 @@
 
 #define TLS_CALLBACK_ERR     (-1)
 
-typedef struct knot_quic_session {
+typedef struct knot_tls_session {
 	node_t n;
 	gnutls_datum_t tls_session;
 	size_t quic_params_len;
 	uint8_t quic_params[sizeof(ngtcp2_transport_params)];
-} knot_quic_session_t;
+} knot_tls_session_t;
 
 static unsigned addr_len(const struct sockaddr_in6 *ss)
 {
@@ -78,13 +74,13 @@ bool knot_quic_session_available(knot_quic_conn_t *conn)
 }
 
 _public_
-struct knot_quic_session *knot_quic_session_save(knot_quic_conn_t *conn)
+struct knot_tls_session *knot_quic_session_save(knot_quic_conn_t *conn)
 {
 	if (!knot_quic_session_available(conn)) {
 		return NULL;
 	}
 
-	knot_quic_session_t *session = malloc(sizeof(*session));
+	knot_tls_session_t *session = malloc(sizeof(*session));
 	if (session == NULL) {
 		return NULL;
 	}
@@ -109,9 +105,9 @@ struct knot_quic_session *knot_quic_session_save(knot_quic_conn_t *conn)
 }
 
 _public_
-int knot_quic_session_load(knot_quic_conn_t *conn, struct knot_quic_session *session)
+int knot_quic_session_load(knot_quic_conn_t *conn, struct knot_tls_session *session)
 {
-	if (session == NULL) {
+	if (session == NULL || (conn != NULL && session->quic_params_len == 0)) {
 		return KNOT_EINVAL;
 	}
 
@@ -611,7 +607,6 @@ int knot_quic_handle(knot_quic_table_t *table, knot_quic_reply_t *reply,
 
 	ngtcp2_version_cid decoded_cids = { 0 };
 	ngtcp2_cid scid = { 0 }, dcid = { 0 }, odcid = { 0 };
-	uint64_t now = get_timestamp();
 	if (reply->in_payload->iov_len < 1) {
 		reply->handle_ret = KNOT_EOK;
 		return KNOT_EOK;
@@ -636,9 +631,15 @@ int knot_quic_handle(knot_quic_table_t *table, knot_quic_reply_t *reply,
 		goto finish;
 	}
 
+	if (conn == NULL && (table->flags & KNOT_QUIC_TABLE_CLIENT_ONLY)) {
+		return KNOT_EOK;
+	}
+
 	if (conn != NULL && (conn->flags & KNOT_QUIC_CONN_BLOCKED)) {
 		return KNOT_EOK;
 	}
+
+	uint64_t now = get_timestamp(); // the timestamps needs to be collected AFTER the check for blocked conn
 
 	ngtcp2_path path;
 	path.remote.addr = (struct sockaddr *)reply->ip_rem;

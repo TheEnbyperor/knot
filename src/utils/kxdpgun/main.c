@@ -371,6 +371,7 @@ void *xdp_gun_thread(void *_ctx)
 			goto cleanup;
 		}
 		quic_table->qlog_dir = ctx->qlog_dir;
+		quic_table->flags |= KNOT_QUIC_TABLE_CLIENT_ONLY;
 #else
 		assert(0);
 #endif // ENABLE_QUIC
@@ -668,8 +669,6 @@ void *xdp_gun_thread(void *_ctx)
 							}
 						}
 						if (!(conn->flags & KNOT_QUIC_CONN_HANDSHAKE_DONE) && conn->streams_count == -1) {
-							knot_quic_table_rem(conn, quic_table);
-							knot_quic_cleanup(&conn, 1);
 							continue;
 						}
 						assert(conn->streams_count > 0);
@@ -809,7 +808,7 @@ cleanup:
 
 #ifdef ENABLE_QUIC
 	knot_quic_table_free(quic_table);
-	struct knot_quic_session *n, *nxt;
+	struct knot_tls_session *n, *nxt;
 	WALK_LIST_DELSAFE(n, nxt, quic_sessions) {
 		knot_quic_session_load(NULL, n);
 	}

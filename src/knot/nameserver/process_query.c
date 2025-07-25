@@ -363,20 +363,23 @@ static int answer_edns_put(knot_pkt_t *resp, knotd_qdata_t *qdata)
 	/* Add EXPIRE if space and not catalog zone, which cannot expire. */
 	if (knot_pkt_edns_option(qdata->query, KNOT_EDNS_OPTION_EXPIRE) != NULL &&
 	    qdata->extra->contents != NULL && !qdata->extra->zone->is_catalog_flag) {
-		int64_t timer = qdata->extra->zone->timers.next_expire;
-		timer = knot_time_min(timer, qdata->extra->contents->dnssec_expire); // NOOP if zero
-		timer = (timer == 0 ? zone_soa_expire(qdata->extra->zone) : timer - time(NULL));
-		timer = MAX(timer, 0);
-		uint32_t timer_be;
-		knot_wire_write_u32((uint8_t *)&timer_be, (uint32_t)timer);
+		knot_time_t expire = knot_time_min(ATOMIC_GET(qdata->extra->contents->dnssec_expire),
+		                                   qdata->extra->zone->timers.next_expire);
+		uint32_t timer;
+		if (expire == 0) {
+			timer = zone_soa_expire(qdata->extra->zone);
+		} else {
+			timer = MAX(0, expire - time(NULL));
+		}
+		timer = htobe32(timer);
 
-		uint16_t expire_size = KNOT_EDNS_OPTION_HDRLEN + sizeof(timer_be);
+		uint16_t expire_size = KNOT_EDNS_OPTION_HDRLEN + sizeof(timer);
 		if (knot_pkt_reserve(resp, expire_size) == KNOT_EOK) {
 			ret = knot_pkt_reclaim(resp, expire_size);
 			assert(ret == KNOT_EOK);
 
 			ret = knot_edns_add_option(&qdata->opt_rr, KNOT_EDNS_OPTION_EXPIRE,
-			                           sizeof(timer_be), (uint8_t *)&timer_be,
+			                           sizeof(timer), (uint8_t *)&timer,
 			                           qdata->mm);
 			if (ret != KNOT_EOK) {
 				return ret;
@@ -721,13 +724,15 @@ bool process_query_acl_check(conf_t *conf, acl_action_t action,
 		       action == ACL_ACTION_TRANSFER);
 		const yp_name_t *item = (action == ACL_ACTION_NOTIFY) ? C_MASTER : C_NOTIFY;
 		conf_val_t rmts = conf_zone_get(conf, item, zone_name);
-		allowed = rmt_allowed(conf, &rmts, query_source, &tsig, tls_session);
+		allowed = rmt_allowed(conf, &rmts, query_source, &tsig, tls_session,
+		                      qdata->params->proto);
 		automatic = allowed;
 	}
 	if (!allowed) {
 		conf_val_t acl = conf_zone_get(conf, C_ACL, zone_name);
 		allowed = acl_allowed(conf, &acl, action, query_source, &tsig,
-		                      zone_name, query, tls_session);
+		                      zone_name, query, tls_session,
+		                      qdata->params->proto);
 	}
 
 	if (log_enabled_debug()) {

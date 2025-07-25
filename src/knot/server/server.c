@@ -27,7 +27,7 @@
 #include "libknot/libknot.h"
 #include "libknot/yparser/ypschema.h"
 #include "libknot/xdp.h"
-#include "libknot/quic/tls_common.h"
+#include "libknot/quic/tls.h"
 #ifdef ENABLE_QUIC
 #include "libknot/quic/quic.h" // knot_quic_session_*
 #endif // ENABLE_QUIC
@@ -617,15 +617,22 @@ static int init_creds(conf_t *conf, server_t *server)
 	uint8_t prev_pin[128];
 	size_t prev_pin_len = server_cert_pin(server, prev_pin, sizeof(prev_pin));
 
+	int uid, gid;
+	if (conf_user(conf, &uid, &gid) != KNOT_EOK) {
+		log_error(QUIC_LOG "failed to get UID or GID");
+		ret = KNOT_ERROR;
+		goto failed;
+	}
+
 	if (server->quic_creds == NULL) {
-		server->quic_creds = knot_creds_init(key_file, cert_file);
+		server->quic_creds = knot_creds_init(key_file, cert_file, uid, gid);
 		if (server->quic_creds == NULL) {
 			log_error(QUIC_LOG "failed to initialize server credentials");
 			ret = KNOT_ERROR;
 			goto failed;
 		}
 	} else {
-		ret = knot_creds_update(server->quic_creds, key_file, cert_file);
+		ret = knot_creds_update(server->quic_creds, key_file, cert_file, uid, gid);
 		if (ret != KNOT_EOK) {
 			goto failed;
 		}
@@ -1444,14 +1451,12 @@ static int reconfigure_timer_db(conf_t *conf, server_t *server)
 	return ret;
 }
 
-#ifdef ENABLE_QUIC
 static void free_sess_ticket(intptr_t ptr)
 {
 	if (ptr != CONN_POOL_FD_INVALID) {
-		knot_quic_session_load(NULL, (void *)ptr);
+		knot_tls_session_load(NULL, (void *)ptr);
 	}
 }
-#endif // ENABLE_QUIC
 
 static int reconfigure_remote_pool(conf_t *conf, server_t *server)
 {
@@ -1471,9 +1476,8 @@ static int reconfigure_remote_pool(conf_t *conf, server_t *server)
 		(void)conn_pool_timeout(global_conn_pool, timeout);
 	}
 
-#ifdef ENABLE_QUIC
-	if (global_sessticket_pool == NULL && server->quic_active) {
-		size_t rmt_count = quic_rmt_count(conf, C_QUIC);
+	if (global_sessticket_pool == NULL && (server->quic_active || server->tls_active)) {
+		size_t rmt_count = quic_rmt_count(conf, C_QUIC) + quic_rmt_count(conf, C_TLS);
 		if (rmt_count > 0) {
 			size_t max_tickets = conf_bg_threads(conf) * rmt_count * 2; // Two addresses per remote.
 			conn_pool_t *new_pool =
@@ -1485,7 +1489,6 @@ static int reconfigure_remote_pool(conf_t *conf, server_t *server)
 			global_sessticket_pool = new_pool;
 		}
 	}
-#endif // ENABLE_QUIC
 
 	val = conf_get(conf, C_SRV, C_RMT_RETRY_DELAY);
 	int delay_ms = conf_int(&val);
@@ -1535,8 +1538,9 @@ int server_reconfigure(conf_t *conf, server_t *server)
 			log_warning("config, exceeded number of database readers");
 		}
 	} else {
-		/* Reconfigure TLS credentials. */
-		if ((ret = init_creds(conf, server)) != KNOT_EOK) {
+		/* Reconfigure QUIC/TLS credentials. */
+		if ((server->quic_active || server->tls_active) &&
+		    (ret = init_creds(conf, server)) != KNOT_EOK) {
 			log_error("failed to reconfigure server credentials (%s)",
 			          knot_strerror(ret));
 		}
