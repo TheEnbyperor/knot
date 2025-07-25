@@ -194,6 +194,7 @@ class Server(object):
         self.ixfr_by_one = None
         self.journal_db_size = 20 * 1024 * 1024
         self.journal_max_usage = 5 * 1024 * 1024
+        self.journal_max_depth = 100
         self.timer_db_size = 1 * 1024 * 1024
         self.kasp_db_size = 10 * 1024 * 1024
         self.catalog_db_size = 10 * 1024 * 1024
@@ -527,6 +528,9 @@ class Server(object):
                     pass
 
     def gen_confile(self):
+        if os.path.isfile(self.confile):
+            copyfile(self.confile, self.confile + str(int(time.time())))
+
         f = open(self.confile, mode="w")
         f.write(self.get_config())
         f.close()
@@ -1468,7 +1472,7 @@ class Knot(Server):
                     s.item_str("key", slave.tsig.name)
                 if slave.cert_key:
                     s.item_str("cert-key", slave.cert_key)
-                s.item("action", "[transfer, update]")
+                s.item("action", "[transfer" + (", update" if z.ddns else "") + "]")
                 servers.add(slave.name)
             for remote in z.dnssec.dnskey_sync if z.dnssec.dnskey_sync else []:
                 dupl_name = remote.name + "_ddns"
@@ -1607,6 +1611,7 @@ class Knot(Server):
         if self.zonemd_generate is not None:
             s.item_str("zonemd-generate", self.zonemd_generate)
         s.item_str("journal-max-usage", self.journal_max_usage)
+        s.item_str("journal-max-depth", self.journal_max_depth)
         s.item_str("adjust-threads", str(random.randint(1,4)))
         if self.semantic_check == "soft":
             self._str(s, "semantic-checks", self.semantic_check)
