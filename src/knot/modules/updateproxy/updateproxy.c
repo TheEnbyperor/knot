@@ -63,7 +63,7 @@ static knotd_state_t updateproxy_fwd(knotd_state_t state, knot_pkt_t *pkt,
 	knot_request_flag_t flags = KNOT_REQUEST_NONE;
 	const struct sockaddr_storage *dst = &proxy->remote;
 	const struct sockaddr_storage *src = &proxy->via;
-	knot_request_t *req = knot_request_make(re.mm, dst, src, qdata->query, NULL, flags);
+	knot_request_t *req = knot_request_make_generic(re.mm, dst, src, qdata->query, NULL, NULL, NULL, NULL, 0, flags);
 	if (req == NULL) {
 		knot_requestor_clear(&re);
 		return state;

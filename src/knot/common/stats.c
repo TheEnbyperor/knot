@@ -255,9 +255,6 @@ int stats_modules(stats_dump_ctr_f fcn, stats_dump_ctx_t *ctx)
 				return ret;
 			}
 		}
-		if (ctx->module_emitted) {
-			ctx->level--;
-		}
 	}
 
 	return KNOT_EOK;

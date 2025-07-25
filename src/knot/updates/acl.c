@@ -347,17 +347,6 @@ bool acl_allowed(conf_t *conf, conf_val_t *acl, acl_action_t action,
 		}
 	}
 
-	bool forward = false;
-	if (action == ACL_ACTION_UPDATE) {
-		conf_val_t val = conf_zone_get(conf, C_MASTER, zone_name);
-		if (val.code == KNOT_EOK) {
-			val = conf_zone_get(conf, C_DDNS_MASTER, zone_name);
-			if (val.code != KNOT_EOK || *conf_str(&val) != '\0') {
-				forward = true;
-			}
-		}
-	}
-
 	while (acl->code == KNOT_EOK) {
 		conf_val_t rmt_val = conf_id_get(conf, C_ACL, C_RMT, acl);
 		bool remote = (rmt_val.code == KNOT_EOK);
