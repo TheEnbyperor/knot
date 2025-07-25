@@ -67,12 +67,17 @@ int event_load(conf_t *conf, zone_t *zone)
 	val = conf_zone_get(conf, C_ZONEFILE_LOAD, zone->name);
 	unsigned zf_from = conf_opt(&val);
 
+	// Note: zone->reverse_from!=NULL almost works, but we need to check if configured even when failed.
+	if (conf_zone_get(conf, C_REVERSE_GEN, zone->name).code == KNOT_EOK ||
+	    zone->cat_members != NULL) { // This should be equivalent to setting catalog-role:generate.
+		zf_from = ZONEFILE_LOAD_DIFSE;
+		load_from = JOURNAL_CONTENT_ALL;
+	}
+
 	int ret = KNOT_EOK;
 
 	// If configured, load journal contents.
-	if (!old_contents_exist &&
-	    ((load_from == JOURNAL_CONTENT_ALL && zf_from != ZONEFILE_LOAD_WHOLE) ||
-	     zone->cat_members != NULL)) {
+	if (!old_contents_exist && (load_from == JOURNAL_CONTENT_ALL && zf_from != ZONEFILE_LOAD_WHOLE)) {
 		ret = zone_load_from_journal(conf, zone, &journal_conts);
 		switch (ret) {
 		case KNOT_EOK:
@@ -87,6 +92,14 @@ int event_load(conf_t *conf, zone_t *zone)
 	} else {
 		zone_in_journal_exists = zone_journal_has_zij(zone);
 	}
+
+	val = conf_zone_get(conf, C_DNSSEC_SIGNING, zone->name);
+	bool dnssec_enable = (conf_bool(&val) && zone->cat_members == NULL), zu_from_zf_conts = false;
+	bool do_diff = (zf_from == ZONEFILE_LOAD_DIFF || zf_from == ZONEFILE_LOAD_DIFSE);
+
+	val = conf_zone_get(conf, C_ZONEMD_GENERATE, zone->name);
+	unsigned digest_alg = conf_opt(&val);
+	bool update_zonemd = (digest_alg != ZONE_DIGEST_NONE);
 
 	// If configured, attempt to load zonefile.
 	if (zf_from != ZONEFILE_LOAD_NONE && zone->cat_members == NULL) {
@@ -152,8 +165,7 @@ int event_load(conf_t *conf, zone_t *zone)
 		zone_contents_t *relevant = (zone->contents != NULL ? zone->contents : journal_conts);
 		if (zf_conts != NULL && zf_from == ZONEFILE_LOAD_DIFSE && relevant != NULL) {
 			uint32_t serial = zone_contents_serial(relevant);
-			conf_val_t policy = conf_zone_get(conf, C_SERIAL_POLICY, zone->name);
-			uint32_t set = serial_next(serial, conf_opt(&policy), 1);
+			uint32_t set = serial_next(serial, conf, zone->name, SERIAL_POLICY_AUTO, 1);
 			zone_contents_set_soa_serial(zf_conts, set);
 			log_zone_info(zone->name, "zone file parsed, serial updated %u -> %u",
 			              zone->zonefile.serial, set);
@@ -176,7 +188,7 @@ int event_load(conf_t *conf, zone_t *zone)
 	}
 	if (zone->cat_members != NULL && !old_contents_exist) {
 		uint32_t serial = journal_conts == NULL ? 1 : zone_contents_serial(journal_conts);
-		serial = serial_next(serial, SERIAL_POLICY_UNIXTIME, 1); // unixtime hardcoded
+		serial = serial_next(serial, conf, zone->name, SERIAL_POLICY_UNIXTIME, 1); // unixtime hardcoded
 		zf_conts = catalog_update_to_zone(zone->cat_members, zone->name, serial);
 		if (zf_conts == NULL) {
 			ret = zone->cat_members->error == KNOT_EOK ? KNOT_ENOMEM : zone->cat_members->error;
@@ -185,8 +197,7 @@ int event_load(conf_t *conf, zone_t *zone)
 	}
 
 	// If configured contents=all, but not present, store zonefile.
-	if ((load_from == JOURNAL_CONTENT_ALL || zone->cat_members != NULL) &&
-	    !zone_in_journal_exists && (zf_conts != NULL || old_contents_exist)) {
+	if (load_from == JOURNAL_CONTENT_ALL && !zone_in_journal_exists && (zf_conts != NULL || old_contents_exist)) {
 		zone_contents_t *store_c = old_contents_exist ? zone->contents : zf_conts;
 		ret = zone_in_journal_store(conf, zone, store_c);
 		if (ret != KNOT_EOK) {
@@ -197,14 +208,7 @@ int event_load(conf_t *conf, zone_t *zone)
 		}
 	}
 
-	val = conf_zone_get(conf, C_DNSSEC_SIGNING, zone->name);
-	bool dnssec_enable = (conf_bool(&val) && zone->cat_members == NULL), zu_from_zf_conts = false;
-	bool do_diff = (zf_from == ZONEFILE_LOAD_DIFF || zf_from == ZONEFILE_LOAD_DIFSE || zone->cat_members != NULL);
 	bool ignore_dnssec = (do_diff && dnssec_enable);
-
-	val = conf_zone_get(conf, C_ZONEMD_GENERATE, zone->name);
-	unsigned digest_alg = conf_opt(&val);
-	bool update_zonemd = (digest_alg != ZONE_DIGEST_NONE);
 
 	// Create zone_update structure according to current state.
 	if (old_contents_exist) {
@@ -232,7 +236,7 @@ int event_load(conf_t *conf, zone_t *zone)
 			                                   ignore_dnssec, update_zonemd);
 		}
 	} else {
-		if (journal_conts != NULL && (zf_from != ZONEFILE_LOAD_WHOLE || zone->cat_members != NULL)) {
+		if (journal_conts != NULL && zf_from != ZONEFILE_LOAD_WHOLE) {
 			if (zf_conts == NULL) {
 				// load zone-in-journal
 				ret = zone_update_from_contents(&up, zone, journal_conts, UPDATE_HYBRID);
@@ -342,8 +346,7 @@ load_end:
 	}
 
 	// If the change is only automatically incremented SOA serial, make it no change.
-	if ((zf_from == ZONEFILE_LOAD_DIFSE || zone->cat_members != NULL) &&
-	    (up.flags & (UPDATE_INCREMENTAL | UPDATE_HYBRID)) &&
+	if (zf_from == ZONEFILE_LOAD_DIFSE && (up.flags & (UPDATE_INCREMENTAL | UPDATE_HYBRID)) &&
 	    changeset_differs_just_serial(&up.change, update_zonemd)) {
 		changeset_t *cpy = changeset_clone(&up.change);
 		if (cpy == NULL) {

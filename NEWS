@@ -1,74 +1,69 @@
-Knot DNS 3.2.13 (2024-06-25)
-============================
+Knot DNS 3.3.0 (2023-08-28)
+===========================
 
-Bugfixes:
+Features:
 ---------
- - knotd: insufficient metadata check can cause journal corruption
- - knotd: failed to build on macOS #909
- - knotd: early NSEC3 salt replanning if 'nsec3-salt-lifetime: -1'
- - knotc: zone check complains about missing zone file #913
- - kdig: failed to parse empty QNAME (do not fill question section)
- - python: failed to set an empty configuration value
- - libzscanner: incorrect alpn processing #923
- - libknot: insufficient check for malformed TCP header options over XDP
- - libknot: infinite loop in knot_rrset_to_wire_extra() #916
-
-Knot DNS 3.2.12 (2023-12-19)
-============================
+ - knotd: full DNS over QUIC (DoQ, RFC 9250) implementation, also without XDP
+ - knotd: bidirectional XFR over QUIC (XoQ) support with opportunistic, strict,
+          and mutual authentication profiles
+ - knotd: automatic reverse PTR records pre-generation (see 'zone.reverse-generate')
+ - knotd: new per zone statistic counters 'zone.size' and 'zone.max-ttl'
+ - knotd: new primary server pinning (see 'zone.master-pin-tolerance')
+ - knotd: new SOA serial modulo policy (see 'zone.serial-modulo')
+ - knotd: new multi-signer operation mode (see 'policy.dnskey-sync' and 'DNSSEC multi-signer')
+ - kdig: support for EDNS presentation format, also in JSON mode (see '+optpresent')
+ - kxdpgun: new TCP/QUIC debug mode 'R' for connection reuse
+ - kxdpgun: new XDP mode parameter '--mode' (Thanks to Jan Včelák)
+ - kxdpgun: new parameter '--qlog' for qlog destination specification
+ - kzonecheck: new '--print' parameter for dumping the zone on stdout
 
 Improvements:
 -------------
- - knotd: zone purging waits for finished zone expiration for better reliability
- - doc: various fixes and extensions
-
-Bugfixes:
----------
- - knotd: zone backup fails due to improper backup context deinitialization #891
- - knotd: failed to sign the zone if maximum zone's TTL is too high
- - knotd: malformed TCP header if used with QUIC in the generic XDP mode
- - knotd: incorrect initialization of TCP limits
- - knotd: orphaned PEM file not deleted when key generation fails
- - knotd: server can crash when processing new TCP connections over XDP
- - kdig: crashed when querying DNS over TLS if TLS handshake times out #896
- - kzonecheck: failed to check DS with SHA-1 or GOST if not supported by local policy
-
-Knot DNS 3.2.11 (2023-10-30)
-============================
-
-Improvements:
--------------
- - keymgr: improved error message if a key file is not accessible
- - keymgr: added offline RRSIGs validation at the end of their validity intervals
- - doc: fixed some typos
-
-Bugfixes:
----------
- - knotd: DNAME record returned with query domain name instead of actual name #873
- - knotd: failed to import configuration file if mod-geoip is in use  #881
- - knotd: failed to sign RRSet that fits to 64k only if compressed
- - keymgr: offline RRSIGs not refreshed if 'rrsig-refresh' is not set
- - knsupdate: incorrect processing of @ in the delete operation #879
-
-Knot DNS 3.2.10 (2023-09-11)
-============================
-
-Improvements:
--------------
- - knotd: multiple catalog groups per member are tolerated, but only one is used
+ - knotd: secondary can be configured not to forward DDNS (see 'zone.ddns-master')
+ - knotd: extended support for UNIX socket configuration (remote, acl)
+ - knotd: stats no longer dump empty or zero counters
+ - knotd: new 'keys-updated' D-Bus event
+ - knotd: added transport protocol information to outgoing event and nameserver logs
  - knotd: server cleans up stale LMDB readers when opening a RW transaction
+ - knotd,kzonecheck: semantic check allows DS only at delegation point
+ - knotc: new zone backup filters '+quic' and '+noquic' for QUIC key backup
+ - mod-dnstap: DNS over QUIC traffic is marked as QUIC
+ - kxdpgun: QUIC connections are closed by default
+ - libs: upgraded embedded libngtcp2 to 0.18.0
+ - kdig: QUIC, TLS, or HTTPS protocol is printed in the final statistics
+ - doc: new sections 'DNS over QUIC' and 'DNSSEC multi-signer'
+ - doc: various improvements
 
 Bugfixes:
 ---------
- - knotd: server can crash when adjusting a wildcard glue
- - knotd: failed to forward DDNS if 'zone.master' points to 'remotes'
- - knotd: subsequent addition and removal to catalog zone isn't handled properly
  - knotd: server can crash if a shared module is loaded and dynamic configuration used
+ - knotd: inaccurate transfer size is logged if EDNS EXPIRE, PADDING, or TSIG is present
+ - knotd: subsequent addition and removal to catalog zone isn't handled properly
  - knotc: configuration import fails if an explicit shared module is configured
+ - utils: database transactions not properly closed when terminated prematurely
  - kdig: double-free on some malformed responses over QUIC #869
  - kdig: some TLS parameters override QUIC parameters
  - libs: NULL record with empty RDATA isn't allowed
+ - tests: dthreads destructor test sometimes fails
 
-Knot DNS 3.2.9 (2023-07-27)
+Compatibility:
+--------------
+ - knotd: responses to forwarded DDNS requests are signed with local TSIG key
+ - knotd: NOTIFY-initiated refresh tries all configured addresses of the remote
+ - knotd: configuration option 'xdp.quic-log' was replaced with 'log.quic'
+ - libs: removed embedded libbpf, an external one is necessary for XDP
+ - libs: DNS over QUIC implementation only supports 'doq' ALPN
+ - ctl: removed 'Version: ' prefix from 'status version' output
+ - modules: reduced parameters of 'knotd_qdata_local_addr()'
+
+Packaging:
+----------
+ - knot-exporter: Prometheus exporter imported from GitHub
+ - knot-exporter: packages for Debian, Ubuntu, and PyPI
+ - debian,ubuntu: new self-hosted repository (see https://pkg.labs.nic.cz/doc/)
+ - docker: upgraded to Debian bookworm-slim
+
+Knot DNS 3.2.9 (2023-27-07)
 ===========================
 
 Improvements:
@@ -85,7 +80,7 @@ Bugfixes:
  - knotd: failed to active D-Bus notifications if not started as systemd service
  - kjournalprint: database transaction not properly closed when terminated prematurely
 
-Knot DNS 3.2.8 (2023-06-26)
+Knot DNS 3.2.8 (2023-26-06)
 ===========================
 
 Improvements:

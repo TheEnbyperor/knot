@@ -1,4 +1,4 @@
-/*  Copyright (C) 2022 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2023 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -28,6 +28,7 @@
 #include "knot/query/layer.h"
 #include "knot/query/query.h"
 #include "knot/query/requestor.h"
+#include "knot/server/server.h"
 #include "knot/updates/changesets.h"
 #include "knot/zone/adjust.h"
 #include "knot/zone/digest.h"
@@ -66,17 +67,20 @@
  * \endverbatim
  */
 
-#define REFRESH_LOG(priority, data, direction, msg...) \
-	ns_log(priority, (data)->zone->name, LOG_OPERATION_REFRESH, direction, \
-	       (data)->remote, (data)->layer->flags & KNOT_REQUESTOR_REUSED, msg)
+#define PROTO(data) \
+	((data)->layer->flags & KNOT_REQUESTOR_QUIC) ? KNOTD_QUERY_PROTO_QUIC : KNOTD_QUERY_PROTO_TCP
+
+#define REFRESH_LOG(priority, data, msg...) \
+	ns_log(priority, (data)->zone->name, LOG_OPERATION_REFRESH, LOG_DIRECTION_NONE, \
+	       (data)->remote, 0, false, msg)
 
 #define AXFRIN_LOG(priority, data, msg...) \
 	ns_log(priority, (data)->zone->name, LOG_OPERATION_AXFR, LOG_DIRECTION_IN, \
-	       (data)->remote, (data)->layer->flags & KNOT_REQUESTOR_REUSED, msg)
+	       (data)->remote, PROTO(data), (data)->layer->flags & KNOT_REQUESTOR_REUSED, msg)
 
 #define IXFRIN_LOG(priority, data, msg...) \
 	ns_log(priority, (data)->zone->name, LOG_OPERATION_IXFR, LOG_DIRECTION_IN, \
-	       (data)->remote, (data)->layer->flags & KNOT_REQUESTOR_REUSED, msg)
+	       (data)->remote, PROTO(data), (data)->layer->flags & KNOT_REQUESTOR_REUSED, msg)
 
 enum state {
 	REFRESH_STATE_INVALID = 0,
@@ -103,7 +107,6 @@ struct refresh_data {
 	const struct sockaddr *remote;    //!< Remote endpoint.
 	const knot_rrset_t *soa;          //!< Local SOA (NULL for AXFR).
 	const size_t max_zone_size;       //!< Maximal zone size.
-	bool use_edns;                    //!< Allow EDNS in SOA/AXFR/IXFR queries.
 	query_edns_data_t edns;           //!< EDNS data to be used in queries.
 	zone_master_fallback_t *fallback; //!< Flags allowing zone_master_try() fallbacks.
 	bool fallback_axfr;               //!< Flag allowing fallback to AXFR,
@@ -275,7 +278,7 @@ static void xfr_log_publish(const struct refresh_data *data,
 	char expires_in[32] = "";
 	fill_expires_in(expires_in, sizeof(expires_in), data);
 
-	REFRESH_LOG(LOG_INFO, data, LOG_DIRECTION_NONE,
+	REFRESH_LOG(LOG_INFO, data,
 	            "zone updated, %0.2f seconds, serial %s -> %u%s%s",
 	            duration, old_info, new_serial, master_info, expires_in);
 }
@@ -307,21 +310,20 @@ static void axfr_slave_sign_serial(zone_contents_t *new_contents, zone_t *zone,
 {
 	// Update slave's serial to ensure it's growing and consistent with
 	// its serial policy.
-	conf_val_t val = conf_zone_get(conf, C_SERIAL_POLICY, zone->name);
-	unsigned serial_policy = conf_opt(&val);
 
 	*master_serial = zone_contents_serial(new_contents);
 
 	uint32_t new_serial, lastsigned_serial;
 	if (zone->contents != NULL) {
 		// Retransfer or AXFR-fallback - increment current serial.
-		new_serial = serial_next(zone_contents_serial(zone->contents), serial_policy, 1);
+		uint32_t cont_serial = zone_contents_serial(zone->contents);
+		new_serial = serial_next(cont_serial, conf, zone->name, SERIAL_POLICY_AUTO, 1);
 	} else if (zone_get_lastsigned_serial(zone, &lastsigned_serial) == KNOT_EOK) {
 		// Bootstrap - increment stored serial.
-		new_serial = serial_next(lastsigned_serial, serial_policy, 1);
+		new_serial = serial_next(lastsigned_serial, conf, zone->name, SERIAL_POLICY_AUTO, 1);
 	} else {
 		// Bootstrap - try to reuse master serial, considering policy.
-		new_serial = serial_next(*master_serial, serial_policy, 0);
+		new_serial = serial_next(*master_serial, conf, zone->name, SERIAL_POLICY_AUTO, 0);
 	}
 	zone_contents_set_soa_serial(new_contents, new_serial);
 }
@@ -394,6 +396,9 @@ static int axfr_finalize(struct refresh_data *data)
 	finalize_timers(data);
 	xfr_log_publish(data, old_serial, zone_contents_serial(new_zone),
 	                master_serial, dnssec_enable, bootstrap);
+
+	data->fallback->remote = false;
+	zone_set_last_master(data->zone, (const struct sockaddr_storage *)data->remote);
 
 	return KNOT_EOK;
 }
@@ -489,7 +494,7 @@ static int axfr_consume(knot_pkt_t *pkt, struct refresh_data *data, bool reuse_s
 	}
 
 	// Process answer packet
-	xfr_stats_add(&data->stats, pkt->size);
+	xfr_stats_add(&data->stats, pkt->size + knot_rrset_size(pkt->tsig_rr));
 	next = axfr_consume_packet(pkt, data);
 
 	// Finalize
@@ -535,7 +540,7 @@ static void ixfr_cleanup(struct refresh_data *data)
 	changesets_free(&data->ixfr.changesets);
 }
 
-static bool ixfr_serial_once(changeset_t *ch, int policy, uint32_t *master_serial, uint32_t *local_serial)
+static bool ixfr_serial_once(changeset_t *ch, conf_t *conf, uint32_t *master_serial, uint32_t *local_serial)
 {
 	uint32_t ch_from = changeset_from(ch), ch_to = changeset_to(ch);
 
@@ -544,7 +549,7 @@ static bool ixfr_serial_once(changeset_t *ch, int policy, uint32_t *master_seria
 	}
 
 	uint32_t new_from = *local_serial;
-	uint32_t new_to = serial_next(new_from, policy, 1);
+	uint32_t new_to = serial_next(new_from, conf, ch->soa_from->owner, SERIAL_POLICY_AUTO, 1);
 	knot_soa_serial_set(ch->soa_from->rrs.rdata, new_from);
 	knot_soa_serial_set(ch->soa_to->rrs.rdata, new_to);
 
@@ -564,9 +569,6 @@ static int ixfr_slave_sign_serial(list_t *changesets, zone_t *zone,
 		return KNOT_ERROR;
 	}
 
-	conf_val_t val = conf_zone_get(conf, C_SERIAL_POLICY, zone->name);
-	unsigned serial_policy = conf_opt(&val);
-
 	int ret = zone_get_master_serial(zone, master_serial);
 	if (ret != KNOT_EOK) {
 		log_zone_error(zone->name, "failed to read master serial"
@@ -575,7 +577,7 @@ static int ixfr_slave_sign_serial(list_t *changesets, zone_t *zone,
 	}
 	changeset_t *chs;
 	WALK_LIST(chs, *changesets) {
-		if (!ixfr_serial_once(chs, serial_policy, master_serial, &local_serial)) {
+		if (!ixfr_serial_once(chs, conf, master_serial, &local_serial)) {
 			return KNOT_EINVAL;
 		}
 	}
@@ -668,6 +670,11 @@ static int ixfr_finalize(struct refresh_data *data)
 	finalize_timers(data);
 	xfr_log_publish(data, old_serial, zone_contents_serial(data->zone->contents),
 	                master_serial, dnssec_enable, false);
+
+	if (old_serial != zone_contents_serial(data->zone->contents)) {
+		data->fallback->remote = false;
+		zone_set_last_master(data->zone, (const struct sockaddr_storage *)data->remote);
+	}
 
 	return KNOT_EOK;
 }
@@ -946,7 +953,7 @@ static int ixfr_consume(knot_pkt_t *pkt, struct refresh_data *data)
 				data->ret = KNOT_ENOMEM;
 				return KNOT_STATE_FAIL;
 			}
-			xfr_stats_add(&data->stats, pkt->size);
+			xfr_stats_add(&data->stats, pkt->size + knot_rrset_size(pkt->tsig_rr));
 			return KNOT_STATE_CONSUME;
 		case XFR_TYPE_AXFR:
 			IXFRIN_LOG(LOG_INFO, data,
@@ -960,7 +967,7 @@ static int ixfr_consume(knot_pkt_t *pkt, struct refresh_data *data)
 			IXFRIN_LOG(LOG_INFO, data,
 			          "zone is up-to-date%s", expires_in);
 			xfr_stats_begin(&data->stats);
-			xfr_stats_add(&data->stats, pkt->size);
+			xfr_stats_add(&data->stats, pkt->size + knot_rrset_size(pkt->tsig_rr));
 			xfr_stats_end(&data->stats);
 			return KNOT_STATE_DONE;
 		case XFR_TYPE_IXFR:
@@ -997,7 +1004,7 @@ static int ixfr_consume(knot_pkt_t *pkt, struct refresh_data *data)
 	}
 
 	// Process answer packet
-	xfr_stats_add(&data->stats, pkt->size);
+	xfr_stats_add(&data->stats, pkt->size + knot_rrset_size(pkt->tsig_rr));
 	next = ixfr_consume_packet(pkt, data);
 
 	// Finalize
@@ -1020,14 +1027,35 @@ static int soa_query_produce(knot_layer_t *layer, knot_pkt_t *pkt)
 		return KNOT_STATE_FAIL;
 	}
 
-	if (data->use_edns) {
-		data->ret = query_put_edns(pkt, &data->edns);
-		if (data->ret != KNOT_EOK) {
-			return KNOT_STATE_FAIL;
-		}
+	return KNOT_STATE_CONSUME;
+}
+
+static bool wait4pinned_master(struct refresh_data *data)
+{
+	// Master pinning not enabled.
+	if (data->fallback->pin_tol == 0) {
+		return false;
+	// Don't restrict refresh from the pinned master.
+	} else if (data->fallback->trying_last) {
+		return false;
+	// Pinned master expected but not yet set, force AXFR (e.g. dropped timers).
+	} else if (data->zone->timers.last_master.sin6_family == AF_UNSPEC) {
+		data->xfr_type = XFR_TYPE_AXFR;
+		return false;
 	}
 
-	return KNOT_STATE_CONSUME;
+	time_t now = time(NULL);
+	// Starting countdown for master transition.
+	if (data->zone->timers.master_pin_hit == 0) {
+		data->zone->timers.master_pin_hit = now;
+		zone_events_schedule_at(data->zone, ZONE_EVENT_REFRESH, now + data->fallback->pin_tol);
+	// Switch to a new master.
+	} else if (data->zone->timers.master_pin_hit + data->fallback->pin_tol <= now) {
+		data->xfr_type = XFR_TYPE_AXFR;
+		return false;
+	}
+
+	return true;
 }
 
 static int soa_query_consume(knot_layer_t *layer, knot_pkt_t *pkt)
@@ -1035,7 +1063,7 @@ static int soa_query_consume(knot_layer_t *layer, knot_pkt_t *pkt)
 	struct refresh_data *data = layer->data;
 
 	if (knot_pkt_ext_rcode(pkt) != KNOT_RCODE_NOERROR) {
-		REFRESH_LOG(LOG_WARNING, data, LOG_DIRECTION_IN,
+		REFRESH_LOG(LOG_WARNING, data,
 		            "server responded with error '%s'",
 		            knot_pkt_ext_rcode_name(pkt));
 		data->ret = KNOT_EDENIED;
@@ -1045,7 +1073,7 @@ static int soa_query_consume(knot_layer_t *layer, knot_pkt_t *pkt)
 	const knot_pktsection_t *answer = knot_pkt_section(pkt, KNOT_ANSWER);
 	const knot_rrset_t *rr = answer->count == 1 ? knot_pkt_rr(answer, 0) : NULL;
 	if (!rr || rr->type != KNOT_RRTYPE_SOA || rr->rrs.count != 1) {
-		REFRESH_LOG(LOG_WARNING, data, LOG_DIRECTION_IN,
+		REFRESH_LOG(LOG_WARNING, data,
 		            "malformed message");
 		conf_val_t val = conf_zone_get(data->conf, C_SEM_CHECKS, data->zone->name);
 		if (conf_opt(&val) == SEMCHECKS_SOFT) {
@@ -1070,7 +1098,13 @@ static int soa_query_consume(knot_layer_t *layer, knot_pkt_t *pkt)
 	bool master_uptodate = serial_is_current(remote_serial, local_serial);
 
 	if (!current) {
-		REFRESH_LOG(LOG_INFO, data, LOG_DIRECTION_NONE,
+		if (wait4pinned_master(data)) {
+			REFRESH_LOG(LOG_INFO, data,
+			            "remote serial %u, zone is outdated, waiting for pinned master",
+			            remote_serial);
+			return KNOT_STATE_DONE;
+		}
+		REFRESH_LOG(LOG_INFO, data,
 		            "remote serial %u, zone is outdated", remote_serial);
 		data->state = STATE_TRANSFER;
 		return KNOT_STATE_RESET; // continue with transfer
@@ -1079,13 +1113,13 @@ static int soa_query_consume(knot_layer_t *layer, knot_pkt_t *pkt)
 		finalize_timers(data);
 		char expires_in[32] = "";
 		fill_expires_in(expires_in, sizeof(expires_in), data);
-		REFRESH_LOG(LOG_INFO, data, LOG_DIRECTION_NONE,
+		REFRESH_LOG(LOG_INFO, data,
 		            "remote serial %u, zone is up-to-date%s",
 		            remote_serial, expires_in);
 		return KNOT_STATE_DONE;
 	} else {
 		finalize_timers_noexpire(data);
-		REFRESH_LOG(LOG_INFO, data, LOG_DIRECTION_NONE,
+		REFRESH_LOG(LOG_INFO, data,
 		            "remote serial %u, remote is outdated", remote_serial);
 		return KNOT_STATE_DONE;
 	}
@@ -1124,13 +1158,6 @@ static int transfer_produce(knot_layer_t *layer, knot_pkt_t *pkt)
 		knot_rrset_free(sending_soa, data->mm);
 	}
 
-	if (data->use_edns) {
-		data->ret = query_put_edns(pkt, &data->edns);
-		if (data->ret != KNOT_EOK) {
-			return KNOT_STATE_FAIL;
-		}
-	}
-
 	return KNOT_STATE_CONSUME;
 }
 
@@ -1140,7 +1167,7 @@ static int transfer_consume(knot_layer_t *layer, knot_pkt_t *pkt)
 
 	consume_edns_expire(data, pkt, true);
 	if (data->expire_timer < 2) {
-		REFRESH_LOG(LOG_WARNING, data, LOG_DIRECTION_NONE,
+		REFRESH_LOG(LOG_WARNING, data,
 		            "remote is expired, ignoring");
 		return KNOT_STATE_IGNORE;
 	}
@@ -1158,7 +1185,8 @@ static int transfer_consume(knot_layer_t *layer, knot_pkt_t *pkt)
 		                 data->xfr_type == XFR_TYPE_UPTODATE ?
 		                 LOG_OPERATION_IXFR : LOG_OPERATION_AXFR,
 		                 LOG_DIRECTION_IN, data->remote,
-		                 layer->flags & KNOT_REQUESTOR_REUSED,
+		                 (layer->flags & KNOT_REQUESTOR_QUIC ?
+		                  KNOTD_QUERY_PROTO_QUIC : KNOTD_QUERY_PROTO_TCP),
 		                 &data->stats);
 
 		/*
@@ -1302,9 +1330,7 @@ static int try_refresh(conf_t *conf, zone_t *zone, const conf_remote_t *master,
 		.remote = (struct sockaddr *)&master->addr,
 		.soa = zone->contents && !trctx->force_axfr ? &soa : NULL,
 		.max_zone_size = max_zone_size(conf, zone->name),
-		.use_edns = !master->no_edns,
-		.edns = query_edns_data_init(conf, master->addr.ss_family,
-		                             QUERY_EDNS_OPT_EXPIRE),
+		.edns = query_edns_data_init(conf, master, QUERY_EDNS_OPT_EXPIRE),
 		.expire_timer = EXPIRE_TIMER_INVALID,
 		.fallback = fallback,
 		.fallback_axfr = false, // will be set upon IXFR consume
@@ -1315,17 +1341,15 @@ static int try_refresh(conf_t *conf, zone_t *zone, const conf_remote_t *master,
 	knot_requestor_init(&requestor, &REFRESH_API, &data, NULL);
 
 	knot_pkt_t *pkt = knot_pkt_new(NULL, KNOT_WIRE_MAX_PKTSIZE, NULL);
-	if (!pkt) {
+	if (pkt == NULL) {
 		knot_requestor_clear(&requestor);
 		return KNOT_ENOMEM;
 	}
 
-	const struct sockaddr_storage *dst = &master->addr;
-	const struct sockaddr_storage *src = &master->via;
 	knot_request_flag_t flags = conf->cache.srv_tcp_fastopen ? KNOT_REQUEST_TFO : 0;
-	knot_request_t *req = knot_request_make(NULL, dst, src, pkt, &master->key, flags);
-	if (!req) {
-		knot_request_free(req, NULL);
+	knot_request_t *req = knot_request_make(NULL, master, pkt, zone->server->quic_creds,
+	                                        &data.edns, flags);
+	if (req == NULL) {
 		knot_requestor_clear(&requestor);
 		return KNOT_ENOMEM;
 	}
@@ -1338,7 +1362,7 @@ static int try_refresh(conf_t *conf, zone_t *zone, const conf_remote_t *master,
 	while (ret = knot_requestor_exec(&requestor, req, timeout),
 	       ret = (data.ret == KNOT_EOK ? ret : data.ret),
 	       data.fallback_axfr && ret != KNOT_EOK) {
-		REFRESH_LOG(LOG_WARNING, &data, LOG_DIRECTION_IN,
+		REFRESH_LOG(LOG_WARNING, &data,
 		            "fallback to AXFR (%s)", knot_strerror(ret));
 		ixfr_cleanup(&data);
 		data.ret = KNOT_EOK;

@@ -1,4 +1,4 @@
-/*  Copyright (C) 2022 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2023 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -87,20 +87,12 @@ static knotd_state_t log_message(knotd_state_t state, const knot_pkt_t *pkt,
 		msgtype = DNSTAP__MESSAGE__TYPE__AUTH_RESPONSE;
 	}
 
-	/* Determine whether we run on UDP/TCP. */
-	/* TODO: distinguish QUIC. */
-	int protocol = IPPROTO_UDP;
-	if (qdata->params->proto == KNOTD_QUERY_PROTO_TCP) {
-		protocol = IPPROTO_TCP;
-	}
-
 	/* Create a dnstap message. */
-	struct sockaddr_storage buff;
 	Dnstap__Message msg;
 	int ret = dt_message_fill(&msg, msgtype,
 	                          (const struct sockaddr *)knotd_qdata_remote_addr(qdata),
-	                          (const struct sockaddr *)knotd_qdata_local_addr(qdata, &buff),
-	                          protocol, pkt->wire, pkt->size, &tv);
+	                          (const struct sockaddr *)knotd_qdata_local_addr(qdata),
+	                          qdata->params->proto, pkt->wire, pkt->size, &tv);
 	if (ret != KNOT_EOK) {
 		return state;
 	}

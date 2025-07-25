@@ -1,4 +1,4 @@
-/*  Copyright (C) 2022 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2023 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -16,6 +16,7 @@
 
 #include <stddef.h>
 
+#include "contrib/net.h"
 #include "libknot/errcode.h"
 #include "utils/common/quic.h"
 #include "utils/common/msg.h"
@@ -59,28 +60,16 @@ void quic_params_clean(quic_params_t *params)
 #define quic_send(ctx, sockfd, family) quic_send_data(ctx, sockfd, family, NULL, 0)
 #define quic_timeout(ts, wait) (((ts) + NGTCP2_SECONDS * (wait)) <= quic_timestamp())
 
-const gnutls_datum_t doq_alpn[] = {
-	{
-		.data = (unsigned char *)"doq",
-		.size = 3
-	},{
-		.data = (unsigned char *)"doq-i12",
-		.size = 7
-	},{
-		.data = (unsigned char *)"doq-i11",
-		.size = 7
-	},{
-		.data = (unsigned char *)"doq-i03",
-		.size = 7
-	}
+const gnutls_datum_t doq_alpn = {
+	(unsigned char *)"doq", 3
 };
 
 #define set_application_error(ctx, error_code, reason, reason_len) \
-	ngtcp2_connection_close_error_set_application_error(&(ctx)->last_err, \
+	ngtcp2_ccerr_set_application_error(&(ctx)->last_err, \
 	        error_code, reason, reason_len)
 
 #define set_transport_error(ctx, error_code, reason, reason_len) \
-	ngtcp2_connection_close_error_set_transport_error(&(ctx)->last_err, \
+	ngtcp2_ccerr_set_transport_error(&(ctx)->last_err, \
 	        error_code, reason, reason_len)
 
 static int recv_stream_data_cb(ngtcp2_conn *conn, uint32_t flags,
@@ -103,9 +92,8 @@ static int recv_stream_data_cb(ngtcp2_conn *conn, uint32_t flags,
 		.iov_len = datalen
 	};
 
-	int ret = knot_tcp_inbuf_update(&ctx->stream.in_buffer, in,
-	                &ctx->stream.in_parsed, &ctx->stream.in_parsed_size,
-	                &ctx->stream.in_parsed_total);
+	int ret = knot_tcp_inbufs_upd(&ctx->stream.in_buffer, in, true,
+	                &ctx->stream.in_parsed, &ctx->stream.in_parsed_total);
 	if (ret != KNOT_EOK) {
 		return NGTCP2_ERR_CALLBACK_FAILURE;
 	}
@@ -351,8 +339,8 @@ static int quic_send_data(quic_ctx_t *ctx, int sockfd, int family,
 
 		msg_iov.iov_len = (size_t)nwrite;
 
-		int ret = quic_set_enc(sockfd, family, ctx->pi.ecn);
-		if (ret != KNOT_EOK) {
+		int ret = net_ecn_set(sockfd, family, ctx->pi.ecn);
+		if (ret != KNOT_EOK && ret != KNOT_ENOTSUP) {
 			return ret;
 		}
 
@@ -389,12 +377,7 @@ static int quic_recv(quic_ctx_t *ctx, int sockfd)
 		return knot_map_errno();
 	}
 	ngtcp2_pkt_info *pi = &ctx->pi;
-	ctx->pi.ecn = quic_get_ecn(&msg, from.sin6_family);
-	if (errno == ENOENT) {
-		pi = NULL;
-	} else if (errno != 0) {
-		return knot_map_errno();
-	}
+	ctx->pi.ecn = net_cmsg_ecn(&msg);
 
 	int ret = ngtcp2_conn_read_pkt(ctx->conn,
 	                               ngtcp2_conn_get_path(ctx->conn),
@@ -416,20 +399,18 @@ static int quic_recv(quic_ctx_t *ctx, int sockfd)
 static int quic_respcpy(quic_ctx_t *ctx, uint8_t *buf, const size_t buf_len)
 {
 	assert(ctx && buf && buf_len > 0);
-	if (ctx->stream.in_parsed &&
-	    ctx->stream.in_parsed_it < ctx->stream.in_parsed_size) {
-		struct iovec *it =
-		        &ctx->stream.in_parsed[ctx->stream.in_parsed_it];
+	if (ctx->stream.in_parsed != NULL) {
+		knot_tcp_inbufs_upd_res_t *cur = ctx->stream.in_parsed;
+		struct iovec *it = &cur->inbufs[ctx->stream.in_parsed_it];
 		if (buf_len < it->iov_len) {
 			return KNOT_ENOMEM;
 		}
-		ctx->stream.in_parsed_it++;
 		size_t len = it->iov_len;
 		memcpy(buf, it->iov_base, len);
-		if (ctx->stream.in_parsed_it == ctx->stream.in_parsed_size) {
-			free(ctx->stream.in_parsed);
-			ctx->stream.in_parsed = NULL;
-			ctx->stream.in_parsed_size = 0;
+		if (++ctx->stream.in_parsed_it == cur->n_inbufs) {
+			ctx->stream.in_parsed_it = 0;
+			ctx->stream.in_parsed = cur->next;
+			free(cur);
 		}
 		return len;
 	}
@@ -460,58 +441,6 @@ int quic_generate_secret(uint8_t *buf, size_t buflen)
 	}
 	memcpy(buf, hash, buflen);
 	return KNOT_EOK;
-}
-
-int quic_set_enc(int sockfd, int family, uint32_t ecn)
-{
-	switch (family) {
-	case AF_INET:
-		if (setsockopt(sockfd, IPPROTO_IP, IP_TOS, &ecn,
-		               (socklen_t)sizeof(ecn)) == -1) {
-			return knot_map_errno();
-		}
-		break;
-	case AF_INET6:
-		if (setsockopt(sockfd, IPPROTO_IPV6, IPV6_TCLASS, &ecn,
-		               (socklen_t)sizeof(ecn)) == -1) {
-			return knot_map_errno();
-		}
-		break;
-	default:
-		return KNOT_ENOTSUP;
-	}
-	return KNOT_EOK;
-}
-
-uint32_t quic_get_ecn(struct msghdr *msg, const int family)
-{
-	errno = 0;
-	switch (family) {
-	case AF_INET:
-		for (struct cmsghdr *cmsg = CMSG_FIRSTHDR(msg); cmsg;
-		     cmsg = CMSG_NXTHDR(msg, cmsg)) {
-			if (cmsg->cmsg_level == IPPROTO_IP &&
-			    cmsg->cmsg_type == IP_TOS && cmsg->cmsg_len) {
-				return *(uint8_t *)CMSG_DATA(cmsg);
-			}
-		}
-		errno = ENOENT;
-		break;
-	case AF_INET6:
-		for (struct cmsghdr *cmsg = CMSG_FIRSTHDR(msg); cmsg;
-		     cmsg = CMSG_NXTHDR(msg, cmsg)) {
-			if (cmsg->cmsg_level == IPPROTO_IPV6 &&
-			    cmsg->cmsg_type == IPV6_TCLASS && cmsg->cmsg_len) {
-				return *(uint8_t *)CMSG_DATA(cmsg);
-			}
-		}
-		errno = ENOENT;
-		break;
-	default:
-		errno = ENOTSUP;
-	}
-
-	return 0;
 }
 
 static int verify_certificate(gnutls_session_t session)
@@ -736,7 +665,7 @@ int quic_send_dns_query(quic_ctx_t *ctx, int sockfd, struct addrinfo *srv,
 			WARN("QUIC, failed to send");
 			return ret;
 		}
-		if (ctx->stream.in_parsed_size) {
+		if (ctx->stream.in_parsed != NULL) {
 			return KNOT_EOK;
 		}
 	}
@@ -846,7 +775,7 @@ void quic_ctx_close(quic_ctx_t *ctx)
 	struct sockaddr_in6 si = { 0 };
 	socklen_t si_len = sizeof(si);
 	if (getsockname(ctx->tls->sockfd, (struct sockaddr *)&si, &si_len) == 0) {
-		quic_set_enc(ctx->tls->sockfd, si.sin6_family, ctx->pi.ecn);
+		(void)net_ecn_set(ctx->tls->sockfd, si.sin6_family, ctx->pi.ecn);
 	}
 
 	(void)sendmsg(ctx->tls->sockfd, &msg, 0);
@@ -869,8 +798,10 @@ void quic_ctx_deinit(quic_ctx_t *ctx)
 		ctx->stream.in_buffer.iov_base = NULL;
 	}
 
-	if (ctx->stream.in_parsed != NULL) {
-		free(ctx->stream.in_parsed);
+	while (ctx->stream.in_parsed != NULL) {
+		knot_tcp_inbufs_upd_res_t *tofree = ctx->stream.in_parsed;
+		ctx->stream.in_parsed = tofree->next;
+		free(tofree);
 	}
 }
 

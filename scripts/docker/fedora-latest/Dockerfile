@@ -1,5 +1,5 @@
 FROM fedora:latest
-MAINTAINER Knot DNS <knot-dns@labs.nic.cz>
+LABEL maintainer="Knot DNS <knot-dns@labs.nic.cz>"
 ENV DEBIAN_FRONTEND noninteractive
 RUN dnf -y upgrade
 RUN dnf -y install \
@@ -8,10 +8,9 @@ RUN dnf -y install \
 	'clang' \
 	'diffutils' \
 	'libtool' \
-	'llvm' \
-	'lmdb-devel' \
 	'make' \
 	'pkgconfig' \
+	'pkgconfig(lmdb)' \
 	'pkgconfig(gnutls)' \
 	'pkgconfig(libbpf)' \
 	'pkgconfig(libcap-ng)' \

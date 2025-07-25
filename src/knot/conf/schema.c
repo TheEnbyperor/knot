@@ -191,6 +191,7 @@ static const knot_lookup_t dbus_events[] = {
 	{ DBUS_EVENT_NONE,            "none" },
 	{ DBUS_EVENT_RUNNING,         "running" },
 	{ DBUS_EVENT_ZONE_UPDATED,    "zone-updated" },
+	{ DBUS_EVENT_KEYS_UPDATED,    "keys-updated" },
 	{ DBUS_EVENT_ZONE_SUBMISSION, "ksk-submission" },
 	{ DBUS_EVENT_ZONE_INVALID,    "dnssec-invalid" },
 	{ 0, NULL }
@@ -236,8 +237,8 @@ static const yp_item_t desc_server[] = {
 	{ C_UDP_MAX_PAYLOAD_IPV6, YP_TINT,  YP_VINT = { KNOT_EDNS_MIN_DNSSEC_PAYLOAD,
 	                                                KNOT_EDNS_MAX_UDP_PAYLOAD,
 	                                                1232, YP_SSIZE } },
-	{ C_CERT_FILE,            YP_TSTR,  YP_VNONE, YP_FNONE, { check_file } },
-	{ C_KEY_FILE,             YP_TSTR,  YP_VNONE, YP_FNONE, { check_file } },
+	{ C_CERT_FILE,            YP_TSTR,  YP_VNONE, YP_FNONE },
+	{ C_KEY_FILE,             YP_TSTR,  YP_VNONE, YP_FNONE },
 	{ C_ECS,                  YP_TBOOL, YP_VNONE },
 	{ C_ANS_ROTATION,         YP_TBOOL, YP_VNONE },
 	{ C_AUTO_ACL,             YP_TBOOL, YP_VNONE },
@@ -245,6 +246,7 @@ static const yp_item_t desc_server[] = {
 	{ C_DBUS_EVENT,           YP_TOPT,  YP_VOPT = { dbus_events, DBUS_EVENT_NONE }, YP_FMULTI },
 	{ C_DBUS_INIT_DELAY,      YP_TINT,  YP_VINT = { 0, INT32_MAX, 1, YP_STIME } },
 	{ C_LISTEN,               YP_TADDR, YP_VADDR = { 53 }, YP_FMULTI, { check_listen } },
+	{ C_LISTEN_QUIC,          YP_TADDR, YP_VADDR = { 853 }, YP_FMULTI, { check_listen } },
 	{ C_COMMENT,              YP_TSTR,  YP_VNONE },
 	// Legacy items.
 	{ C_LISTEN_XDP,           YP_TADDR, YP_VADDR = { 0 },                        YP_FMULTI, { legacy_item } },
@@ -263,7 +265,6 @@ static const yp_item_t desc_xdp[] = {
 	{ C_TCP,                  YP_TBOOL, YP_VNONE },
 	{ C_QUIC,                 YP_TBOOL, YP_VNONE },
 	{ C_QUIC_PORT,            YP_TINT,  YP_VINT = { 1, 65535, 853 } },
-	{ C_QUIC_LOG,             YP_TBOOL, YP_VNONE },
 	{ C_TCP_MAX_CLIENTS,      YP_TINT,  YP_VINT = { 1024, INT32_MAX, 1000000 } },
 	{ C_TCP_INBUF_MAX_SIZE,   YP_TINT,  YP_VINT = { MEGA(1), SSIZE_MAX, MEGA(100), YP_SSIZE } },
 	{ C_TCP_OUTBUF_MAX_SIZE,  YP_TINT,  YP_VINT = { MEGA(1), SSIZE_MAX, MEGA(100), YP_SSIZE } },
@@ -272,6 +273,8 @@ static const yp_item_t desc_xdp[] = {
 	{ C_TCP_RESEND,           YP_TINT,  YP_VINT = { 1, INT32_MAX, 5, YP_STIME } },
 	{ C_ROUTE_CHECK,          YP_TBOOL, YP_VNONE },
 	{ C_COMMENT,              YP_TSTR,  YP_VNONE },
+	// Legacy items.
+	{ C_QUIC_LOG,             YP_TBOOL, YP_VNONE, YP_FNONE, { legacy_item } },
 	{ NULL }
 };
 
@@ -287,6 +290,7 @@ static const yp_item_t desc_log[] = {
 	{ C_SERVER,  YP_TOPT, YP_VOPT = { log_severities, 0 } },
 	{ C_CTL,     YP_TOPT, YP_VOPT = { log_severities, 0 } },
 	{ C_ZONE,    YP_TOPT, YP_VOPT = { log_severities, 0 } },
+	{ C_QUIC,    YP_TOPT, YP_VOPT = { log_severities, 0 } },
 	{ C_ANY,     YP_TOPT, YP_VOPT = { log_severities, 0 } },
 	{ C_COMMENT, YP_TSTR, YP_VNONE },
 	{ NULL }
@@ -339,9 +343,11 @@ static const yp_item_t desc_key[] = {
 
 static const yp_item_t desc_remote[] = {
 	{ C_ID,               YP_TSTR,  YP_VNONE, CONF_IO_FREF },
-	{ C_ADDR,             YP_TADDR, YP_VADDR = { 53 }, YP_FMULTI },
+	{ C_ADDR,             YP_TADDR, YP_VADDR = { 53, 853 }, YP_FMULTI },
 	{ C_VIA,              YP_TADDR, YP_VNONE, YP_FMULTI },
+	{ C_QUIC,             YP_TBOOL, YP_VNONE },
 	{ C_KEY,              YP_TREF,  YP_VREF = { C_KEY }, YP_FNONE, { check_ref } },
+	{ C_CERT_KEY,         YP_TB64,  YP_VNONE, YP_FMULTI, { check_cert_pin } },
 	{ C_BLOCK_NOTIFY_XFR, YP_TBOOL, YP_VNONE },
 	{ C_NO_EDNS,          YP_TBOOL, YP_VNONE },
 	{ C_AUTO_ACL,         YP_TBOOL, YP_VBOOL = { true } },
@@ -369,6 +375,7 @@ static const yp_item_t desc_acl[] = {
 	{ C_UPDATE_OWNER_MATCH, YP_TOPT,   YP_VOPT = { acl_update_owner_match, ACL_UPDATE_MATCH_SUBEQ } },
 	{ C_UPDATE_OWNER_NAME,  YP_TDATA,  YP_VDATA = { 0, NULL, rdname_to_bin, rdname_to_txt },
 	                                   YP_FMULTI, },
+	{ C_CERT_KEY,           YP_TB64,   YP_VNONE, YP_FMULTI, { check_cert_pin } },
 	{ C_COMMENT,            YP_TSTR,   YP_VNONE },
 	{ NULL }
 };
@@ -381,6 +388,13 @@ static const yp_item_t desc_submission[] = {
 	                           CONF_IO_FRLD_ZONES },
 	{ C_PARENT_DELAY, YP_TINT, YP_VINT = { 0, UINT32_MAX, 0, YP_STIME } },
 	{ C_COMMENT,      YP_TSTR, YP_VNONE },
+	{ NULL }
+};
+
+static const yp_item_t desc_dnskey_sync[] = {
+	{ C_ID,           YP_TSTR, YP_VNONE },
+	{ C_RMT,          YP_TREF, YP_VREF = { C_RMT, C_RMTS }, YP_FMULTI, { check_ref } },
+	{ C_CHK_INTERVAL, YP_TINT, YP_VINT = { 1, UINT32_MAX, 60, YP_STIME } },
 	{ NULL }
 };
 
@@ -427,6 +441,8 @@ static const yp_item_t desc_policy[] = {
 	                                   { check_ref } },
 	{ C_DS_PUSH,             YP_TREF,  YP_VREF = { C_RMT, C_RMTS }, YP_FMULTI | CONF_IO_FRLD_ZONES,
 	                                   { check_ref } },
+	{ C_DNSKEY_SYNC,         YP_TREF,  YP_VREF = { C_DNSKEY_SYNC }, CONF_IO_FRLD_ZONES,
+	                                   { check_ref } },
 	{ C_CDS_CDNSKEY,         YP_TOPT,  YP_VOPT = { cds_cdnskey, CDS_CDNSKEY_ROLLOVER },
 	                                   CONF_IO_FRLD_ZONES },
 	{ C_CDS_DIGESTTYPE,      YP_TOPT,  YP_VOPT = { cds_digesttype, DNSSEC_KEY_DIGEST_SHA256 },
@@ -443,9 +459,10 @@ static const yp_item_t desc_policy[] = {
 	{ C_STORAGE,             YP_TSTR,  YP_VSTR = { STORAGE_DIR }, FLAGS }, \
 	{ C_FILE,                YP_TSTR,  YP_VNONE, FLAGS }, \
 	{ C_MASTER,              YP_TREF,  YP_VREF = { C_RMT, C_RMTS }, YP_FMULTI, { check_ref } }, \
-	{ C_DDNS_MASTER,         YP_TREF,  YP_VREF = { C_RMT }, YP_FNONE, { check_ref } }, \
+	{ C_DDNS_MASTER,         YP_TREF,  YP_VREF = { C_RMT }, YP_FNONE, { check_ref_empty } }, \
 	{ C_NOTIFY,              YP_TREF,  YP_VREF = { C_RMT, C_RMTS }, YP_FMULTI, { check_ref } }, \
 	{ C_ACL,                 YP_TREF,  YP_VREF = { C_ACL }, YP_FMULTI, { check_ref } }, \
+	{ C_MASTER_PIN_TOL,      YP_TINT,  YP_VINT = { 0, UINT32_MAX, 0, YP_STIME } }, \
 	{ C_PROVIDE_IXFR,        YP_TBOOL, YP_VBOOL = { true } }, \
 	{ C_SEM_CHECKS,          YP_TOPT,  YP_VOPT = { semantic_checks, SEMCHECKS_OFF }, FLAGS }, \
 	{ C_ZONEFILE_SYNC,       YP_TINT,  YP_VINT = { -1, INT32_MAX, 0, YP_STIME } }, \
@@ -461,7 +478,9 @@ static const yp_item_t desc_policy[] = {
 	{ C_DNSSEC_POLICY,       YP_TREF,  YP_VREF = { C_POLICY }, FLAGS, { check_ref_dflt } }, \
 	{ C_DS_PUSH,             YP_TREF,  YP_VREF = { C_RMT, C_RMTS }, YP_FMULTI | FLAGS, \
 	                                   { check_ref } }, \
+	{ C_REVERSE_GEN,         YP_TDNAME,YP_VNONE, FLAGS | CONF_IO_FRLD_ZONES }, \
 	{ C_SERIAL_POLICY,       YP_TOPT,  YP_VOPT = { serial_policies, SERIAL_POLICY_INCREMENT } }, \
+	{ C_SERIAL_MODULO,       YP_TSTR,  YP_VSTR = { "0/1" }, YP_FNONE, { check_modulo } }, \
 	{ C_ZONEMD_GENERATE,     YP_TOPT,  YP_VOPT = { zone_digest, ZONE_DIGEST_NONE }, FLAGS }, \
 	{ C_ZONEMD_VERIFY,       YP_TBOOL, YP_VNONE, FLAGS }, \
 	{ C_REFRESH_MIN_INTERVAL,YP_TINT,  YP_VINT = { 2, UINT32_MAX, 2, YP_STIME } }, \
@@ -523,6 +542,7 @@ const yp_item_t conf_schema[] = {
 	{ C_RMTS,     YP_TGRP, YP_VGRP = { desc_remotes }, YP_FMULTI, { check_remotes } },
 	{ C_ACL,      YP_TGRP, YP_VGRP = { desc_acl }, YP_FMULTI, { check_acl } },
 	{ C_SBM,      YP_TGRP, YP_VGRP = { desc_submission }, YP_FMULTI },
+	{ C_DNSKEY_SYNC, YP_TGRP, YP_VGRP = { desc_dnskey_sync }, YP_FMULTI, { check_dnskey_sync } },
 	{ C_POLICY,   YP_TGRP, YP_VGRP = { desc_policy }, YP_FMULTI, { check_policy } },
 	{ C_TPL,      YP_TGRP, YP_VGRP = { desc_template }, YP_FMULTI, { check_template } },
 	{ C_ZONE,     YP_TGRP, YP_VGRP = { desc_zone }, YP_FMULTI | CONF_IO_FZONE, { check_zone } },

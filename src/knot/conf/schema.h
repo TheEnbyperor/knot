@@ -41,6 +41,7 @@
 #define C_CDS_CDNSKEY		"\x13""cds-cdnskey-publish"
 #define C_CDS_DIGESTTYPE	"\x0F""cds-digest-type"
 #define C_CERT_FILE		"\x09""cert-file"
+#define C_CERT_KEY		"\x08""cert-key"
 #define C_CHK_INTERVAL		"\x0E""check-interval"
 #define C_COMMENT		"\x07""comment"
 #define C_CONFIG		"\x06""config"
@@ -51,6 +52,7 @@
 #define C_DDNS_MASTER		"\x0B""ddns-master"
 #define C_DENY			"\x04""deny"
 #define C_DNSKEY_MGMT		"\x11""dnskey-management"
+#define C_DNSKEY_SYNC		"\x0B""dnskey-sync"
 #define C_DNSKEY_TTL		"\x0A""dnskey-ttl"
 #define C_DNSSEC_POLICY		"\x0D""dnssec-policy"
 #define C_DNSSEC_SIGNING	"\x0E""dnssec-signing"
@@ -84,9 +86,11 @@
 #define C_KSK_SHARED		"\x0a""ksk-shared"
 #define C_KSK_SIZE		"\x08""ksk-size"
 #define C_LISTEN		"\x06""listen"
+#define C_LISTEN_QUIC		"\x0B""listen-quic"
 #define C_LOG			"\x03""log"
 #define C_MANUAL		"\x06""manual"
 #define C_MASTER		"\x06""master"
+#define C_MASTER_PIN_TOL	"\x14""master-pin-tolerance"
 #define C_MODULE		"\x06""module"
 #define C_NO_EDNS		"\x07""no-edns"
 #define C_NOTIFY		"\x06""notify"
@@ -129,6 +133,7 @@
 #define C_SBM			"\x0A""submission"
 #define C_SECRET		"\x06""secret"
 #define C_SEM_CHECKS		"\x0F""semantic-checks"
+#define C_SERIAL_MODULO		"\x0D""serial-modulo"
 #define C_SERIAL_POLICY		"\x0D""serial-policy"
 #define C_SERVER		"\x06""server"
 #define C_SIGNING_THREADS	"\x0F""signing-threads"
@@ -225,6 +230,7 @@ enum {
 };
 
 enum {
+	SERIAL_POLICY_AUTO       = 0,
 	SERIAL_POLICY_INCREMENT  = 1,
 	SERIAL_POLICY_UNIXTIME   = 2,
 	SERIAL_POLICY_DATESERIAL = 3,
@@ -274,6 +280,7 @@ enum {
 	DBUS_EVENT_ZONE_UPDATED    = (1 << 1),
 	DBUS_EVENT_ZONE_SUBMISSION = (1 << 2),
 	DBUS_EVENT_ZONE_INVALID    = (1 << 3),
+	DBUS_EVENT_KEYS_UPDATED    = (1 << 4),
 };
 
 extern const knot_lookup_t acl_actions[];

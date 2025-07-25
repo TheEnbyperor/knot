@@ -1,4 +1,5 @@
 /*  Copyright (C) 2023 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
     the Free Software Foundation, either version 3 of the License, or
@@ -36,16 +37,18 @@
 
 #define FNAME_MAX (MAX(sizeof(LABEL_FILE), sizeof(LOCK_FILE)))
 #define PREPARE_PATH(var, file) \
-		char var[path_size(ctx)]; \
-		get_full_path(ctx, file, var);
+		size_t var_size = path_size(ctx); \
+		char var[var_size]; \
+		get_full_path(ctx, file, var, var_size);
 
 static const char *label_file_name = LABEL_FILE;
 static const char *lock_file_name =  LOCK_FILE;
 static const char *label_file_head = LABEL_FILE_HEAD;
 
-static void get_full_path(zone_backup_ctx_t *ctx, const char *filename, char *full_path)
+static void get_full_path(zone_backup_ctx_t *ctx, const char *filename,
+                          char *full_path, size_t full_path_size)
 {
-	(void)sprintf(full_path, "%s/%s", ctx->backup_dir, filename);
+	(void)snprintf(full_path, full_path_size, "%s/%s", ctx->backup_dir, filename);
 }
 
 static size_t path_size(zone_backup_ctx_t *ctx)
@@ -65,11 +68,7 @@ static int make_label_file(zone_backup_ctx_t *ctx)
 	}
 
 	// Prepare the server identity.
-	conf_val_t val = conf_get(conf(), C_SRV, C_IDENT);
-	const char *ident = conf_str(&val);
-	if (ident == NULL || ident[0] == '\0') {
-		ident = conf()->hostname;
-	}
+	const char *ident = conf()->cache.srv_ident;
 
 	// Prepare the timestamps.
 	char started_time[64], finished_time[64];
@@ -91,7 +90,7 @@ static int make_label_file(zone_backup_ctx_t *ctx)
 	              "finished_time: %s\n"
 	              "knot_version: %s\n"
 	              "parameters: +%szonefile +%sjournal +%stimers +%skaspdb +%scatalog "
-	                  "+backupdir %s\n"
+	                  "+%squic +backupdir %s\n"
 	              "zone_count: %d\n",
 	              label_file_head,
 	              ctx->backup_format, ident, started_time, finished_time, PACKAGE_VERSION,
@@ -100,6 +99,7 @@ static int make_label_file(zone_backup_ctx_t *ctx)
 	              ctx->backup_timers ? "" : "no",
 	              ctx->backup_kaspdb ? "" : "no",
 	              ctx->backup_catalog ? "" : "no",
+	              ctx->backup_quic ? "" : "no",
 	              ctx->backup_dir,
 	              ctx->zone_count);
 
@@ -185,13 +185,14 @@ int backupdir_init(zone_backup_ctx_t *ctx)
 			return KNOT_ENOTDIR;
 		}
 	} else {
-		ret = make_dir(ctx->backup_dir, S_IRWXU|S_IRWXG, true);
+		ret = make_dir(ctx->backup_dir, S_IRWXU | S_IRWXG, true);
 		if (ret != KNOT_EOK) {
 			return ret;
 		}
 	}
 
-	char full_path[path_size(ctx)];
+	size_t full_path_size = path_size(ctx);
+	char full_path[full_path_size];
 
 	// Check for existence of a label file and the backup format used.
 	if (ctx->restore_mode) {
@@ -200,14 +201,14 @@ int backupdir_init(zone_backup_ctx_t *ctx)
 			return ret;
 		}
 	} else {
-		get_full_path(ctx, label_file_name, full_path);
+		get_full_path(ctx, label_file_name, full_path, full_path_size);
 		if (stat(full_path, &sb) == 0) {
 			return KNOT_EEXIST;
 		}
 	}
 
 	// Make (or check for existence of) a lock file.
-	get_full_path(ctx, lock_file_name, full_path);
+	get_full_path(ctx, lock_file_name, full_path, full_path_size);
 	if (ctx->restore_mode) {
 		// Just check.
 		if (stat(full_path, &sb) == 0) {
@@ -215,7 +216,7 @@ int backupdir_init(zone_backup_ctx_t *ctx)
 		}
 	} else {
 		// Create it (which also checks for its existence).
-		int lock_file = open(full_path, O_CREAT|O_EXCL,
+		int lock_file = open(full_path, O_CREAT | O_EXCL,
 		                     S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 		if (lock_file < 0) {
 			// Make the reported error better understandable than KNOT_EEXIST.

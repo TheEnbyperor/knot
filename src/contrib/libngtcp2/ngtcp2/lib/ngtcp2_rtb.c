@@ -35,6 +35,11 @@
 #include "ngtcp2_rcvry.h"
 #include "ngtcp2_rst.h"
 #include "ngtcp2_unreachable.h"
+#include "ngtcp2_tstamp.h"
+
+ngtcp2_objalloc_def(frame_chain, ngtcp2_frame_chain, oplent);
+
+ngtcp2_objalloc_def(rtb_entry, ngtcp2_rtb_entry, oplent);
 
 int ngtcp2_frame_chain_new(ngtcp2_frame_chain **pfrc, const ngtcp2_mem *mem) {
   *pfrc = ngtcp2_mem_malloc(mem, sizeof(ngtcp2_frame_chain));
@@ -300,7 +305,7 @@ static int greater(const ngtcp2_ksl_key *lhs, const ngtcp2_ksl_key *rhs) {
 
 void ngtcp2_rtb_init(ngtcp2_rtb *rtb, ngtcp2_pktns_id pktns_id,
                      ngtcp2_strm *crypto, ngtcp2_rst *rst, ngtcp2_cc *cc,
-                     ngtcp2_log *log, ngtcp2_qlog *qlog,
+                     int64_t cc_pkt_num, ngtcp2_log *log, ngtcp2_qlog *qlog,
                      ngtcp2_objalloc *rtb_entry_objalloc,
                      ngtcp2_objalloc *frc_objalloc, const ngtcp2_mem *mem) {
   rtb->rtb_entry_objalloc = rtb_entry_objalloc;
@@ -318,7 +323,7 @@ void ngtcp2_rtb_init(ngtcp2_rtb *rtb, ngtcp2_pktns_id pktns_id,
   rtb->num_pto_eliciting = 0;
   rtb->probe_pkt_left = 0;
   rtb->pktns_id = pktns_id;
-  rtb->cc_pkt_num = 0;
+  rtb->cc_pkt_num = cc_pkt_num;
   rtb->cc_bytes_in_flight = 0;
   rtb->persistent_congestion_start_ts = UINT64_MAX;
   rtb->num_lost_pkts = 0;
@@ -889,12 +894,14 @@ static void rtb_on_pkt_acked(ngtcp2_rtb *rtb, ngtcp2_rtb_entry *ent,
 
   ngtcp2_rst_update_rate_sample(rtb->rst, ent, ts);
 
-  cc->on_pkt_acked(cc, cstat,
-                   ngtcp2_cc_pkt_init(&pkt, ent->hd.pkt_num, ent->pktlen,
-                                      rtb->pktns_id, ent->ts, ent->rst.lost,
-                                      ent->rst.tx_in_flight,
-                                      ent->rst.is_app_limited),
-                   ts);
+  if (cc->on_pkt_acked) {
+    cc->on_pkt_acked(cc, cstat,
+                     ngtcp2_cc_pkt_init(&pkt, ent->hd.pkt_num, ent->pktlen,
+                                        rtb->pktns_id, ent->ts, ent->rst.lost,
+                                        ent->rst.tx_in_flight,
+                                        ent->rst.is_app_limited),
+                     ts);
+  }
 
   if (!(ent->flags & NGTCP2_RTB_ENTRY_FLAG_PROBE) &&
       (ent->flags & NGTCP2_RTB_ENTRY_FLAG_ACK_ELICITING)) {
@@ -932,7 +939,7 @@ static void conn_verify_ecn(ngtcp2_conn *conn, ngtcp2_pktns *pktns,
   }
 
   if (fr->type == NGTCP2_FRAME_ACK_ECN) {
-    if (largest_acked_sent_ts != UINT64_MAX &&
+    if (cc->congestion_event && largest_acked_sent_ts != UINT64_MAX &&
         fr->ecn.ce > pktns->rx.ecn.ack.ce) {
       cc->congestion_event(cc, cstat, largest_acked_sent_ts, ts);
     }
@@ -1118,7 +1125,9 @@ ngtcp2_ssize ngtcp2_rtb_recv_ack(ngtcp2_rtb *rtb, const ngtcp2_ack *fr,
   rtb->rst->lost += cc_ack.bytes_lost;
 
   cc_ack.largest_acked_sent_ts = largest_acked_sent_ts;
-  cc->on_ack_recv(cc, cstat, &cc_ack, ts);
+  if (cc->on_ack_recv) {
+    cc->on_ack_recv(cc, cstat, &cc_ack, ts);
+  }
 
   return num_acked;
 
@@ -1137,7 +1146,7 @@ static int rtb_pkt_lost(ngtcp2_rtb *rtb, ngtcp2_conn_stat *cstat,
                         size_t pkt_thres, ngtcp2_tstamp ts) {
   ngtcp2_tstamp loss_time;
 
-  if (ent->ts + loss_delay <= ts ||
+  if (ngtcp2_tstamp_elapsed(ent->ts, loss_delay, ts) ||
       rtb->largest_acked_tx_pkt_num >= ent->hd.pkt_num + (int64_t)pkt_thres) {
     return 1;
   }
@@ -1292,7 +1301,9 @@ static int rtb_detect_lost_pkt(ngtcp2_rtb *rtb, uint64_t *ppkt_lost,
         break;
       }
 
-      cc->congestion_event(cc, cstat, latest_ts, ts);
+      if (cc->congestion_event) {
+        cc->congestion_event(cc, cstat, latest_ts, ts);
+      }
 
       loss_window = latest_ts - oldest_ts;
       /* Persistent congestion situation is only evaluated for app
@@ -1316,7 +1327,9 @@ static int rtb_detect_lost_pkt(ngtcp2_rtb *rtb, uint64_t *ppkt_lost,
           cstat->rttvar = conn->local.settings.initial_rtt / 2;
           cstat->first_rtt_sample_ts = UINT64_MAX;
 
-          cc->on_persistent_congestion(cc, cstat, ts);
+          if (cc->on_persistent_congestion) {
+            cc->on_persistent_congestion(cc, cstat, ts);
+          }
         }
       }
 

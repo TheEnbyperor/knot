@@ -1,5 +1,5 @@
 ## Intermediate stage ##
-FROM debian:bullseye-slim
+FROM debian:bookworm-slim AS builder
 
 # Environment
 ENV BUILD_PKGS \
@@ -8,40 +8,32 @@ ENV BUILD_PKGS \
     gcc \
     libbpf-dev \
     libedit-dev \
-    libelf-dev \
     libfstrm-dev \
+    libgnutls28-dev \
     libidn2-0-dev \
     liblmdb-dev \
     libmaxminddb-dev \
     libmnl-dev \
     libnghttp2-dev \
+    libngtcp2-crypto-gnutls-dev \
+    libngtcp2-dev \
     libprotobuf-c-dev \
     libtool \
     liburcu-dev \
-    nettle-dev \
-    libtasn1-6-dev \
-    libunistring-dev \
+    libxdp-dev \
     make \
     pkg-config \
-    protobuf-c-compiler \
-    wget
+    protobuf-c-compiler
 
 # Install dependencies
 RUN apt-get update && \
     apt-get install -yqq ${BUILD_PKGS}
-
-RUN wget https://www.gnupg.org/ftp/gcrypt/gnutls/v3.7/gnutls-3.7.9.tar.xz && \
-    tar -xf gnutls-3.7.9.tar.xz && \
-    cd gnutls-3.7.9 && \
-    ./configure --prefix=/gnutls --without-p11-kit && \
-    make install -j$(grep -c ^processor /proc/cpuinfo)
 
 # Build the project
 COPY . /knot-src
 WORKDIR /knot-src
 ARG FASTPARSER=disable
 RUN autoreconf -if && \
-    PKG_CONFIG_PATH="/gnutls/lib/pkgconfig" \
     CFLAGS="-g -O2 -DNDEBUG -D_FORTIFY_SOURCE=2 -fstack-protector-strong" \
     ./configure --prefix=/ \
                 --with-rundir=/rundir \
@@ -61,41 +53,48 @@ RUN if [ "$CHECK" = "enable" ]; then make -j$(grep -c ^processor /proc/cpuinfo) 
     make install DESTDIR=/tmp/knot-install
 
 ## Final stage ##
-FROM debian:bullseye-slim
-MAINTAINER Knot DNS <knot-dns@labs.nic.cz>
+FROM debian:bookworm-slim
+LABEL maintainer="Knot DNS <knot-dns@labs.nic.cz>"
 
 # Environment
 ENV RUNTIME_PKGS \
-    libbpf0 \
+    libbpf1 \
     libedit2 \
-    libelf1 \
     libfstrm0 \
+    libgnutls30 \
     libidn2-0 \
     liblmdb0 \
     libmaxminddb0 \
     libmnl0 \
     libnghttp2-14 \
+    libngtcp2-crypto-gnutls2 \
+    libngtcp2-9 \
     libprotobuf-c1 \
-    liburcu6 \
-    ca-certificates
-
-# Copy artifacts
-COPY --from=0 /tmp/knot-install/ /
-COPY --from=0 /gnutls /
+    liburcu8 \
+    libxdp1
 
 # Install dependencies and create knot user and group
 ARG UID=53
 RUN apt-get update && \
-    apt-get install -yqq ${RUNTIME_PKGS} && \
+    apt-get install -yqq ${RUNTIME_PKGS} adduser && \
     rm -rf /var/lib/apt/lists/* && \
     ldconfig && \
     adduser --quiet --system --group --no-create-home --home /storage --uid=${UID} knot && \
-    chown knot:knot /config /rundir /storage && \
-    update-ca-certificates
+    install -o knot -g knot -d /config /rundir /storage
+
+# Copy artifacts
+# `COPY --from=builder /tmp/knot-install/ /` doesn't work with DOCKER_BUILDKIT=1 under buildx
+COPY --from=builder /tmp/knot-install/bin/     /bin/
+COPY --from=builder /tmp/knot-install/config/  /config/
+COPY --from=builder /tmp/knot-install/include/ /include/
+COPY --from=builder /tmp/knot-install/lib/     /lib/
+COPY --from=builder /tmp/knot-install/sbin/    /sbin/
+COPY --from=builder /tmp/knot-install/share/   /share/
 
 # Expose port
 EXPOSE 53/UDP
 EXPOSE 53/TCP
+EXPOSE 853/UDP
 
 # Prepare shared directories
 VOLUME /config

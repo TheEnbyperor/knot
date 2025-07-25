@@ -32,8 +32,49 @@
 #include "utils/common/msg.h"
 #include "utils/common/tls.h"
 #include "libknot/libknot.h"
+#include "contrib/net.h"
 #include "contrib/proxyv2/proxyv2.h"
 #include "contrib/sockaddr.h"
+
+static knot_probe_proto_t get_protocol(const net_t *net)
+{
+#ifdef ENABLE_QUIC
+	if (net->quic.params.enable) {
+		return KNOT_PROBE_PROTO_QUIC;
+	} else
+#endif
+#ifdef LIBNGHTTP2
+	if (net->https.params.enable) {
+		return KNOT_PROBE_PROTO_HTTPS;
+	} else
+#endif
+	if (net->tls.params != NULL && net->tls.params->enable) {
+		return KNOT_PROBE_PROTO_TLS;
+	} else if (net->socktype == PROTO_TCP) {
+		return KNOT_PROBE_PROTO_TCP;
+	} else {
+		assert(net->socktype == PROTO_UDP);
+		return KNOT_PROBE_PROTO_UDP;
+	}
+}
+
+static const char *get_protocol_str(const knot_probe_proto_t proto)
+{
+	switch (proto) {
+	case KNOT_PROBE_PROTO_UDP:
+		return "UDP";
+	case KNOT_PROBE_PROTO_QUIC:
+		return "QUIC";
+	case KNOT_PROBE_PROTO_TCP:
+		return "TCP";
+	case KNOT_PROBE_PROTO_TLS:
+		return "TLS";
+	case KNOT_PROBE_PROTO_HTTPS:
+		return "HTTPS";
+	default:
+		return "UNKNOWN";
+	}
+}
 
 srv_info_t *srv_info_create(const char *name, const char *service)
 {
@@ -151,23 +192,23 @@ static int get_addr(const srv_info_t *server,
 }
 
 void get_addr_str(const struct sockaddr_storage *ss,
-                  const int                     socktype,
+                  const knot_probe_proto_t      protocol,
                   char                          **dst)
 {
-	char addr_str[SOCKADDR_STRLEN] = {0};
+	char addr_str[SOCKADDR_STRLEN] = { 0 };
+	const char *proto_str = get_protocol_str(protocol);
 
 	// Get network address string and port number.
 	sockaddr_tostr(addr_str, sizeof(addr_str), ss);
 
 	// Calculate needed buffer size
-	const char *sock_name = get_sockname(socktype);
-	size_t buflen = strlen(addr_str) + strlen(sock_name) + 3 /* () */;
+	size_t buflen = strlen(addr_str) + strlen(proto_str) + 3 /* () */;
 
 	// Free previous string if any and write result
 	free(*dst);
 	*dst = malloc(buflen);
 	if (*dst != NULL) {
-		int ret = snprintf(*dst, buflen, "%s(%s)", addr_str, sock_name);
+		int ret = snprintf(*dst, buflen, "%s(%s)", addr_str, proto_str);
 		if (ret <= 0 || ret >= buflen) {
 			**dst = '\0';
 		}
@@ -364,31 +405,6 @@ static char *net_get_remote(const net_t *net)
 	return NULL;
 }
 
-#ifdef ENABLE_QUIC
-static int fd_set_recv_ecn(int fd, int family)
-{
-	unsigned int tos = 1;
-	switch (family) {
-	case AF_INET:
-#ifdef IP_RECVTOS
-		if (setsockopt(fd, IPPROTO_IP, IP_RECVTOS, &tos, sizeof(tos)) == -1) {
-			return knot_map_errno();
-		}
-#endif
-		break;
-	case AF_INET6:
-		if (setsockopt(fd, IPPROTO_IPV6, IPV6_RECVTCLASS, &tos, sizeof(tos)) == -1) {
-			return knot_map_errno();
-		}
-		break;
-	default:
-		return KNOT_EINVAL;
-	}
-	return KNOT_EOK;
-}
-#endif
-
-
 int net_connect(net_t *net)
 {
 	if (net == NULL || net->srv == NULL) {
@@ -398,7 +414,7 @@ int net_connect(net_t *net)
 
 	// Set remote information string.
 	get_addr_str((struct sockaddr_storage *)net->srv->ai_addr,
-	             net->socktype, &net->remote_str);
+	             get_protocol(net), &net->remote_str);
 
 	// Create socket.
 	int sockfd = socket(net->srv->ai_family, net->socktype, 0);
@@ -452,14 +468,14 @@ int net_connect(net_t *net)
 			}
 			if (ret != 0 && errno != EINPROGRESS) {
 				WARN("can't connect to %s", net->remote_str);
-				close(sockfd);
+				net_close(net);
 				return KNOT_NET_ECONNECT;
 			}
 
 			// Check for connection timeout.
 			if (!fastopen && poll(&pfd, 1, 1000 * net->wait) != 1) {
 				WARN("connection timeout for %s", net->remote_str);
-				close(sockfd);
+				net_close(net);
 				return KNOT_NET_ECONNECT;
 			}
 
@@ -467,7 +483,7 @@ int net_connect(net_t *net)
 			cs = getsockopt(sockfd, SOL_SOCKET, SO_ERROR, &err, &err_len);
 			if (cs < 0 || err != 0) {
 				WARN("can't connect to %s", net->remote_str);
-				close(sockfd);
+				net_close(net);
 				return KNOT_NET_ECONNECT;
 			}
 		}
@@ -480,7 +496,7 @@ int net_connect(net_t *net)
 				ret = tls_ctx_setup_remote_endpoint(&net->tls, &doh_alpn, 1, NULL,
 				        remote);
 				if (ret != 0) {
-					close(sockfd);
+					net_close(net);
 					return ret;
 				}
 				if (remote && net->https.authority == NULL) {
@@ -495,14 +511,14 @@ int net_connect(net_t *net)
 				ret = tls_ctx_setup_remote_endpoint(&net->tls, &dot_alpn, 1, NULL,
 				        net_get_remote(net));
 				if (ret != 0) {
-					close(sockfd);
+					net_close(net);
 					return ret;
 				}
 				ret = tls_ctx_connect(&net->tls, sockfd, fastopen,
 				        (struct sockaddr_storage *)net->srv->ai_addr);
 			}
 			if (ret != KNOT_EOK) {
-				close(sockfd);
+				net_close(net);
 				return ret;
 			}
 		}
@@ -511,21 +527,21 @@ int net_connect(net_t *net)
 	else if (net->socktype == SOCK_DGRAM) {
 		if (net->quic.params.enable) {
 			// Establish QUIC connection.
-			ret = fd_set_recv_ecn(sockfd, net->srv->ai_family);
-			if (ret != KNOT_EOK) {
-				close(sockfd);
+			ret = net_cmsg_ecn_enable(sockfd, net->srv->ai_family);
+			if (ret != KNOT_EOK && ret != KNOT_ENOTSUP) {
+				net_close(net);
 				return ret;
 			}
 			ret = tls_ctx_setup_remote_endpoint(&net->tls,
-			        doq_alpn, 4, QUIC_PRIORITY, net_get_remote(net));
+			        &doq_alpn, 1, QUIC_PRIORITY, net_get_remote(net));
 			if (ret != 0) {
-				close(sockfd);
+				net_close(net);
 				return ret;
 			}
 			ret = quic_ctx_connect(&net->quic, sockfd,
 			        (struct addrinfo *)net->srv);
 			if (ret != KNOT_EOK) {
-				close(sockfd);
+				net_close(net);
 				return ret;
 			}
 		}
@@ -575,7 +591,7 @@ int net_set_local_info(net_t *net)
 	net->local_info = new_info;
 
 	get_addr_str((struct sockaddr_storage *)net->local_info->ai_addr,
-	             net->socktype, &net->local_str);
+	             get_protocol(net), &net->local_str);
 
 	return KNOT_EOK;
 }
@@ -756,7 +772,7 @@ int net_receive(const net_t *net, uint8_t *buf, const size_t buf_len)
 			if (from_len > sizeof(from) ||
 			    memcmp(&from, net->srv->ai_addr, from_len) != 0) {
 				char *src = NULL;
-				get_addr_str(&from, net->socktype, &src);
+				get_addr_str(&from, get_protocol(net), &src);
 				WARN("unexpected reply source %s", src);
 				free(src);
 				continue;

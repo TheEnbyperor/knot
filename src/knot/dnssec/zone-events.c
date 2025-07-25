@@ -100,7 +100,6 @@ int knot_dnssec_nsec3resalt(kdnssec_ctx_t *ctx, bool soa_rrsigs_ok,
 			ctx->zone->nsec3_salt_created = ctx->now;
 			ret = kdnssec_ctx_commit(ctx);
 			*salt_changed = ctx->now;
-			*when_resalt = 0;
 		}
 		// continue to planning next resalt even if NOK
 		if (ctx->policy->nsec3_salt_lifetime > 0) {
@@ -173,7 +172,9 @@ int knot_dnssec_zone_sign(zone_update_t *update,
 	update_policy_from_zone(ctx.policy, update->new_cont);
 
 	if (ctx.policy->rrsig_refresh_before < ctx.policy->zone_maximal_ttl + ctx.policy->propagation_delay) {
-		log_zone_warning(zone_name, "DNSSEC, rrsig-refresh too low to prevent expired RRSIGs in resolver caches");
+		log_zone_error(zone_name, "DNSSEC, rrsig-refresh too low to prevent expired RRSIGs in resolver caches");
+		result = KNOT_EINVAL;
+		goto done;
 	}
 	if (ctx.policy->rrsig_lifetime <= ctx.policy->rrsig_refresh_before) {
 		log_zone_error(zone_name, "DNSSEC, rrsig-lifetime lower than rrsig-refresh");
@@ -301,6 +302,7 @@ int knot_dnssec_zone_sign(zone_update_t *update,
 done:
 	if (result == KNOT_EOK) {
 		reschedule->next_sign = schedule_next(&ctx, &keyset, ctx.offline_next_time, zone_expire);
+		reschedule->plan_dnskey_sync = ctx.policy->has_dnskey_sync;
 	} else {
 		reschedule->next_sign = knot_dnssec_failover_delay(&ctx);
 		reschedule->next_rollover = 0;
@@ -428,6 +430,9 @@ done:
 		knot_time_t next = knot_time_min(ctx.offline_next_time, zone_expire);
 		// NOTE: this is usually NOOP since signing planned earlier
 		zone_events_schedule_at(update->zone, ZONE_EVENT_DNSSEC, (time_t)(next ? next : -1));
+		if (ctx.policy->has_dnskey_sync) {
+			zone_events_schedule_now(update->zone, ZONE_EVENT_DNSKEY_SYNC);
+		}
 	}
 
 	free_zone_keys(&keyset);

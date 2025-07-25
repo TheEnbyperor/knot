@@ -1,4 +1,4 @@
-/*  Copyright (C) 2022 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2023 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -38,7 +38,11 @@
 #include "knot/conf/module.h"
 #include "knot/conf/schema.h"
 #include "knot/common/log.h"
+#include "knot/zone/serial.h"
 #include "libknot/errcode.h"
+#ifdef ENABLE_QUIC
+#include "libknot/quic/quic.h"
+#endif // ENABLE_QUIC
 #include "libknot/yparser/yptrafo.h"
 #include "libknot/xdp.h"
 #include "contrib/files.h"
@@ -264,6 +268,17 @@ int check_ref_dflt(
 	return KNOT_EOK;
 }
 
+int check_ref_empty(
+	knotd_conf_check_args_t *args)
+{
+	if (check_ref(args) != KNOT_EOK && args->data_len > 1) { // Empty string has length 1.
+		args->err_str = "invalid reference";
+		return KNOT_ENOENT;
+	}
+
+	return KNOT_EOK;
+}
+
 int check_listen(
 	knotd_conf_check_args_t *args)
 {
@@ -315,6 +330,35 @@ int check_xdp_listen(
 
 	return KNOT_EOK;
 #endif
+}
+
+int check_cert_pin(
+	knotd_conf_check_args_t *args)
+{
+#ifdef ENABLE_QUIC
+	if (args->data_len != sizeof(uint16_t) + KNOT_QUIC_PIN_LEN) {
+		(void)snprintf(check_str, sizeof(check_str),
+		               "invalid certificate pin, expected base64-encoded "
+		               "%u bytes", KNOT_QUIC_PIN_LEN);
+		args->err_str = check_str;
+		return KNOT_EINVAL;
+	}
+#endif // ENABLE_QUIC
+
+	return KNOT_EOK;
+}
+
+int check_modulo(
+	knotd_conf_check_args_t *args)
+{
+	uint32_t rem, mod;
+	if (serial_modulo_parse((const char *)args->data, &rem, &mod) != KNOT_EOK ||
+	    mod > 256 || rem >= mod) {
+		args->err_str = "invalid value, expected format 'R/M', where R < M <= 256";
+		return KNOT_EINVAL;
+	}
+
+	return KNOT_EOK;
 }
 
 static int dir_exists(const char *dir)
@@ -425,26 +469,6 @@ int check_module_id(
 	return KNOT_EOK;
 }
 
-int check_file(
-	knotd_conf_check_args_t *args)
-{
-	char *path = abs_path((const char *)args->data, CONFIG_DIR);
-
-	struct stat st;
-	int ret = stat(path, &st);
-	free(path);
-
-	if (ret != 0) {
-		args->err_str = "invalid file";
-		return KNOT_EINVAL;
-	} else if(!S_ISREG(st.st_mode)) {
-		args->err_str = "not a file";
-		return KNOT_EINVAL;
-	} else {
-		return KNOT_EOK;
-	}
-}
-
 #define CHECK_LEGACY_NAME(section, old_item, new_item) { \
 	conf_val_t val = conf_get_txn(args->extra->conf, args->extra->txn, \
 	                              section, old_item); \
@@ -517,6 +541,19 @@ static void check_mtu(knotd_conf_check_args_t *args, conf_val_t *xdp_listen)
 #endif
 }
 
+#ifdef ENABLE_QUIC
+static bool listen_hit(const struct sockaddr_storage *ss1,
+                       const struct sockaddr_storage *ss2)
+{
+	if (sockaddr_is_any(ss1) || sockaddr_is_any(ss2)) {
+		return ss1->ss_family == ss2->ss_family &&
+		       sockaddr_port(ss1) == sockaddr_port(ss2);
+	} else {
+		return sockaddr_cmp(ss1, ss2, false) == 0;
+	}
+}
+#endif // ENABLE_QUIC
+
 int check_server(
 	knotd_conf_check_args_t *args)
 {
@@ -527,6 +564,37 @@ int check_server(
 	if (key_file.code != crt_file.code) {
 		args->err_str = "both server certificate and key must be set";
 		return KNOT_EINVAL;
+	}
+
+	conf_val_t liquic_val = conf_get_txn(args->extra->conf, args->extra->txn,
+	                                     C_SRV, C_LISTEN_QUIC);
+	size_t liquic_count = conf_val_count(&liquic_val);
+	if (liquic_count > 0) {
+#ifdef ENABLE_QUIC
+		conf_val_t listen_val = conf_get_txn(args->extra->conf, args->extra->txn,
+		                                     C_SRV, C_LISTEN);
+		size_t listen_count = conf_val_count(&listen_val);
+
+		for (size_t i = 0; listen_count > 0 && i < liquic_count; i++) {
+			struct sockaddr_storage liquic_addr = conf_addr(&liquic_val, NULL);
+
+			for (size_t j = 0; j < listen_count; j++) {
+				struct sockaddr_storage listen_addr = conf_addr(&listen_val, NULL);
+				if (listen_hit(&liquic_addr, &listen_addr)) {
+					args->err_str = "QUIC listen address/port overlaps "
+					                "with UDP listen address/port";
+					return KNOT_EINVAL;
+				}
+				conf_val_next(&listen_val);
+			}
+
+			conf_val(&listen_val);
+			conf_val_next(&liquic_val);
+		}
+#else
+		args->err_str = "QUIC processing not available";
+		return KNOT_EINVAL;
+#endif // ENABLE_QUIC
 	}
 
 	return KNOT_EOK;
@@ -789,6 +857,17 @@ int check_remote(
 		return KNOT_EINVAL;
 	}
 
+	conf_val_t quic = conf_rawid_get_txn(args->extra->conf, args->extra->txn, C_RMT,
+	                                     C_QUIC, args->id, args->id_len);
+	if (quic.code == KNOT_EOK) {
+#ifdef ENABLE_QUIC
+		(void)0;
+#else
+		args->err_str = "QUIC not available";
+		return KNOT_EINVAL;
+#endif
+	}
+
 	return KNOT_EOK;
 }
 
@@ -799,6 +878,19 @@ int check_remotes(
 	                                       C_RMT, args->id, args->id_len);
 	if (remote.code != KNOT_EOK) {
 		args->err_str = "no remote defined";
+		return KNOT_EINVAL;
+	}
+
+	return KNOT_EOK;
+}
+
+int check_dnskey_sync(
+	knotd_conf_check_args_t *args)
+{
+	conf_val_t addr = conf_rawid_get_txn(args->extra->conf, args->extra->txn, C_DNSKEY_SYNC,
+	                                     C_RMT, args->id, args->id_len);
+	if (conf_val_count(&addr) == 0) {
+		args->err_str = "no remote address defined";
 		return KNOT_EINVAL;
 	}
 
@@ -874,30 +966,47 @@ int check_zone(
 	conf_val_t zf_load = conf_zone_get_txn(args->extra->conf, args->extra->txn,
 	                                       C_ZONEFILE_LOAD, yp_dname(args->id));
 	conf_val_t journal = conf_zone_get_txn(args->extra->conf, args->extra->txn,
-					       C_JOURNAL_CONTENT, yp_dname(args->id));
-	if (conf_opt(&zf_load) == ZONEFILE_LOAD_DIFSE) {
+	                                       C_JOURNAL_CONTENT, yp_dname(args->id));
+	int zf_load_val = conf_opt(&zf_load);
+	if (zf_load_val == ZONEFILE_LOAD_DIFSE) {
 		if (conf_opt(&journal) != JOURNAL_CONTENT_ALL) {
 			args->err_str = "'zonefile-load: difference-no-serial' requires 'journal-content: all'";
 			return KNOT_EINVAL;
 		}
 	}
 
-	conf_val_t reverse = conf_zone_get_txn(args->extra->conf, args->extra->txn,
-	                                       C_REVERSE_GEN, yp_dname(args->id));
-	if (reverse.code == KNOT_EOK &&
-	    !(conf_opt(&zf_load) == ZONEFILE_LOAD_DIFSE && conf_opt(&journal) == JOURNAL_CONTENT_ALL)) {
-		args->err_str = "'reverse-generate' requires 'zonefile-load: difference-no-serial' and 'journal-content: all'";
-		return KNOT_EINVAL;
-	}
-
-	conf_val_t validation = conf_zone_get_txn(args->extra->conf, args->extra->txn,
-	                                          C_DNSSEC_VALIDATION, yp_dname(args->id));
-	if (conf_bool(&validation)) {
-		conf_val_t signing = conf_zone_get_txn(args->extra->conf, args->extra->txn,
-		                                       C_DNSSEC_SIGNING, yp_dname(args->id));
-		if (conf_bool(&signing)) {
+	conf_val_t signing = conf_zone_get_txn(args->extra->conf, args->extra->txn,
+	                                       C_DNSSEC_SIGNING, yp_dname(args->id));
+	if (conf_bool(&signing)) {
+		conf_val_t validation = conf_zone_get_txn(args->extra->conf, args->extra->txn,
+		                                          C_DNSSEC_VALIDATION, yp_dname(args->id));
+		if (conf_bool(&validation)) {
 			args->err_str = "'dnssec-validation' is not compatible with 'dnssec-signing'";
 			return KNOT_EINVAL;
+		}
+	} else {
+		conf_val_t ddnsmaster = conf_zone_get_txn(args->extra->conf, args->extra->txn,
+		                                          C_DDNS_MASTER, yp_dname(args->id));
+		if (ddnsmaster.code == KNOT_EOK && *conf_str(&ddnsmaster) == '\0') {
+			args->err_str = "empty 'ddns-master' requires 'dnssec-signing' enabled";
+			return KNOT_EINVAL;
+		}
+	}
+
+	conf_val_t serial_modulo = conf_zone_get_txn(args->extra->conf, args->extra->txn,
+	                                             C_SERIAL_MODULO, yp_dname(args->id));
+	if (serial_modulo.code == KNOT_EOK) {
+		uint32_t rem, mod;
+		int ret = serial_modulo_parse(conf_str(&serial_modulo), &rem, &mod);
+		if (ret == KNOT_EOK && mod > 1) {
+			if (!conf_bool(&signing)) {
+				args->err_str = "'serial-modulo' is only possible with `dnssec-signing`";
+				return KNOT_EINVAL;
+			} else if (zf_load_val != ZONEFILE_LOAD_DIFSE && zf_load_val != ZONEFILE_LOAD_NONE) {
+				args->err_str = "'serial-modulo' requires 'zonefile-load' either 'none'"
+				                " or 'difference-no-serial'";
+				return KNOT_EINVAL;
+			}
 		}
 	}
 

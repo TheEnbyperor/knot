@@ -8,14 +8,15 @@ Uploaders:
 Build-Depends-Indep:
  python3-setuptools,
  python3-sphinx,
+ python3-sphinx-panels,
 Build-Depends:
  autoconf,
  automake,
  debhelper (>= 11),
  dh-python,
+ libbpf-dev,
  libcap-ng-dev,
  libedit-dev,
- libelf-dev,
  libfstrm-dev,
  libgnutls28-dev,
  libidn2-dev,
@@ -29,6 +30,7 @@ Build-Depends:
  libsystemd-dev [linux-any] | libsystemd-journal-dev [linux-any],
  libtool,
  liburcu-dev,
+ libxdp-dev,
  pkg-config,
  protobuf-c-compiler,
  python3-all,
@@ -43,7 +45,7 @@ Architecture: any
 Depends:
  adduser,
  libdnssec9 (= ${binary:Version}),
- libknot13 (= ${binary:Version}),
+ libknot14 (= ${binary:Version}),
  libzscanner4 (= ${binary:Version}),
  ${misc:Depends},
  ${shlibs:Depends},
@@ -59,7 +61,7 @@ Description: Authoritative domain name server
  registry and hence is well suited to run anything from the root
  zone, the top-level domain, to many smaller standard domain names.
 
-Package: libknot13
+Package: libknot14
 Architecture: any
 Depends:
  ${misc:Depends},
@@ -115,7 +117,7 @@ Architecture: any
 Depends:
  libdnssec9 (= ${binary:Version}),
  libgnutls28-dev,
- libknot13 (= ${binary:Version}),
+ libknot14 (= ${binary:Version}),
  libzscanner4 (= ${binary:Version}),
  ${misc:Depends},
  ${shlibs:Depends},
@@ -134,7 +136,7 @@ Package: knot-dnsutils
 Architecture: any
 Depends:
  libdnssec9 (= ${binary:Version}),
- libknot13 (= ${binary:Version}),
+ libknot14 (= ${binary:Version}),
  libzscanner4 (= ${binary:Version}),
  ${misc:Depends},
  ${shlibs:Depends},
@@ -161,7 +163,7 @@ Package: knot-dnssecutils
 Architecture: any
 Depends:
  libdnssec9 (= ${binary:Version}),
- libknot13 (= ${binary:Version}),
+ libknot14 (= ${binary:Version}),
  libzscanner4 (= ${binary:Version}),
  ${misc:Depends},
  ${shlibs:Depends},
@@ -183,7 +185,7 @@ Package: knot-host
 Architecture: any
 Depends:
  libdnssec9 (= ${binary:Version}),
- libknot13 (= ${binary:Version}),
+ libknot14 (= ${binary:Version}),
  libzscanner4 (= ${binary:Version}),
  ${misc:Depends},
  ${shlibs:Depends},
@@ -249,6 +251,22 @@ Description: Documentation for Knot DNS
  .
  This package provides various documents that are useful for
  maintaining a working Knot DNS installation.
+
+Package: knot-exporter
+Architecture: all
+Depends:
+ ${misc:Depends},
+ ${python3:Depends},
+Section: python
+Description: Prometheus exporter for Knot DNS
+ Knot DNS is a fast, authoritative only, high performance, feature
+ full and open source name server.
+ .
+ Knot DNS is developed by CZ.NIC Labs, the R&D department of .CZ
+ registry and hence is well suited to run anything from the root
+ zone, the top-level domain, to many smaller standard domain names.
+ .
+ This package provides Python Prometheus exporter for Knot DNS.
 
 Package: python3-libknot
 Architecture: all

@@ -278,7 +278,7 @@ build:archive:
     - mkdir _build
     - cd _build
     - ../configure
-    - make distcheck V=1
+    - make distcheck V=1 DISTCHECK_CONFIGURE_FLAGS="--disable-static" -j2
   only:
     - master
     - tags
@@ -347,7 +347,7 @@ pkg:make-archive:
   only:
     variables:
       - $PKGTEST == "1"
-  image: $CI_REGISTRY/packaging/apkg/test/debian-11
+  image: $CI_REGISTRY/packaging/apkg/test/debian-12
   artifacts:
     paths:
       - pkg/
@@ -370,10 +370,6 @@ pkg:debian-10:
   <<: *pkg_test_deb
   image: $CI_REGISTRY/packaging/apkg/test/debian-10
 
-pkg:ubuntu-24.04:
-  <<: *pkg_test_deb
-  image: $CI_REGISTRY/packaging/apkg/test/ubuntu-24.04
-
 pkg:ubuntu-22.04:
   <<: *pkg_test_deb
   image: $CI_REGISTRY/packaging/apkg/test/ubuntu-22.04
@@ -386,13 +382,13 @@ pkg:ubuntu-18.04:
   <<: *pkg_test_deb
   image: $CI_REGISTRY/packaging/apkg/test/ubuntu-18.04
 
-pkg:fedora-39:
+pkg:fedora-37:
   <<: *pkg_test
-  image: $CI_REGISTRY/packaging/apkg/test/fedora-39
+  image: $CI_REGISTRY/packaging/apkg/test/fedora-37
 
-pkg:fedora-38:
+pkg:fedora-36:
   <<: *pkg_test
-  image: $CI_REGISTRY/packaging/apkg/test/fedora-38
+  image: $CI_REGISTRY/packaging/apkg/test/fedora-36
 
 pkg:alma-9:
   <<: *pkg_test
@@ -407,6 +403,7 @@ pkg:centos-7:
   image: $CI_REGISTRY/packaging/apkg/test/centos-7
   allow_failure: true
 
-pkg:suse-15:
-  <<: *pkg_test
-  image: $CI_REGISTRY/packaging/apkg/test/suse-15
+#Temporarily disable SUSE-15 as it lacks libxdp
+#pkg:suse-15:
+#  <<: *pkg_test
+#  image: $CI_REGISTRY/packaging/apkg/test/suse-15

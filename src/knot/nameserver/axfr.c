@@ -1,4 +1,4 @@
-/*  Copyright (C) 2022 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2023 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -26,10 +26,11 @@
 
 #define ZONE_NAME(qdata) knot_pkt_qname((qdata)->query)
 #define REMOTE(qdata) (struct sockaddr *)knotd_qdata_remote_addr(qdata)
+#define PROTO(qdata) (qdata)->params->proto
 
 #define AXFROUT_LOG(priority, qdata, fmt...) \
 	ns_log(priority, ZONE_NAME(qdata), LOG_OPERATION_AXFR, \
-	       LOG_DIRECTION_OUT, REMOTE(qdata), false, fmt)
+	       LOG_DIRECTION_OUT, REMOTE(qdata), PROTO(qdata), false, fmt)
 
 /* AXFR context. @note aliasing the generic xfr_proc */
 struct axfr_proc {
@@ -107,6 +108,25 @@ static void axfr_query_cleanup(knotd_qdata_t *qdata)
 	rcu_read_unlock();
 }
 
+static void axfr_answer_finished(knotd_qdata_t *qdata, knot_pkt_t *pkt, int state)
+{
+	struct xfr_proc *xfr = qdata->extra->ext;
+
+	switch (state) {
+	case KNOT_STATE_PRODUCE:
+		xfr_stats_add(&xfr->stats, pkt->size);
+		break;
+	case KNOT_STATE_DONE:
+		xfr_stats_add(&xfr->stats, pkt->size);
+		xfr_stats_end(&xfr->stats);
+		xfr_log_finished(ZONE_NAME(qdata), LOG_OPERATION_AXFR, LOG_DIRECTION_OUT,
+		                 REMOTE(qdata), PROTO(qdata), &xfr->stats);
+		break;
+	default:
+		break;
+	}
+}
+
 static int axfr_query_check(knotd_qdata_t *qdata)
 {
 	NS_NEED_ZONE(qdata, KNOT_RCODE_NOTAUTH);
@@ -158,6 +178,7 @@ static int axfr_query_init(knotd_qdata_t *qdata)
 	/* Set up cleanup callback. */
 	qdata->extra->ext = axfr;
 	qdata->extra->ext_cleanup = &axfr_query_cleanup;
+	qdata->extra->ext_finished = &axfr_answer_finished;
 
 	/* No zone changes during multipacket answer (unlocked in axfr_answer_cleanup) */
 	rcu_read_lock();
@@ -181,7 +202,6 @@ int axfr_process_query(knot_pkt_t *pkt, knotd_qdata_t *qdata)
 	struct axfr_proc *axfr = qdata->extra->ext;
 	if (axfr == NULL) {
 		int ret = axfr_query_init(qdata);
-		axfr = qdata->extra->ext;
 		switch (ret) {
 		case KNOT_EOK:      /* OK */
 			AXFROUT_LOG(LOG_INFO, qdata, "started, serial %u",
@@ -214,9 +234,6 @@ int axfr_process_query(knot_pkt_t *pkt, knotd_qdata_t *qdata)
 	case KNOT_ESPACE: /* Couldn't write more, send packet and continue. */
 		return KNOT_STATE_PRODUCE; /* Check for more. */
 	case KNOT_EOK:    /* Last response. */
-		xfr_stats_end(&axfr->proc.stats);
-		xfr_log_finished(ZONE_NAME(qdata), LOG_OPERATION_AXFR, LOG_DIRECTION_OUT,
-		                 REMOTE(qdata), false, &axfr->proc.stats);
 		return KNOT_STATE_DONE;
 	default:          /* Generic error. */
 		AXFROUT_LOG(LOG_ERR, qdata, "failed (%s)", knot_strerror(ret));

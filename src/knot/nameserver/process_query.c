@@ -30,6 +30,10 @@
 #include "knot/nameserver/notify.h"
 #include "knot/server/server.h"
 #include "libknot/libknot.h"
+#ifdef ENABLE_QUIC
+#include "libknot/quic/quic.h"
+#endif // ENABLE_QUIC
+#include "contrib/base64.h"
 #include "contrib/macros.h"
 #include "contrib/mempattern.h"
 
@@ -379,6 +383,12 @@ static int answer_edns_put(knot_pkt_t *resp, knotd_qdata_t *qdata)
 		}
 	}
 
+	/* Reclaim reserved OPT size. Should remain reserved space just for TSIG. */
+	ret = knot_pkt_reclaim(resp, opt_wire_size);
+	if (ret != KNOT_EOK) {
+		return ret;
+	}
+
 	/* Align the response if QUIC with EDNS. */
 	if (qdata->params->proto == KNOTD_QUERY_PROTO_QUIC) {
 		int pad_len = knot_pkt_default_padding_size(resp, &qdata->opt_rr);
@@ -389,12 +399,6 @@ static int answer_edns_put(knot_pkt_t *resp, knotd_qdata_t *qdata)
 				return ret;
 			}
 		}
-	}
-
-	/* Reclaim reserved size. */
-	ret = knot_pkt_reclaim(resp, opt_wire_size);
-	if (ret != KNOT_EOK) {
-		return ret;
 	}
 
 	uint8_t *wire_end = resp->wire + resp->size;
@@ -636,6 +640,11 @@ static int process_query_out(knot_layer_t *ctx, knot_pkt_t *pkt)
 			next_state = KNOT_STATE_FAIL;
 			goto finish;
 		}
+
+		/* Optional postprocessing with known final EDNS + TSIG (for XFR stats). */
+		if (qdata->extra->ext_finished != NULL) {
+			qdata->extra->ext_finished(qdata, pkt, next_state);
+		}
 	}
 
 finish:
@@ -702,28 +711,49 @@ bool process_query_acl_check(conf_t *conf, acl_action_t action,
 		       action == ACL_ACTION_TRANSFER);
 		const yp_name_t *item = (action == ACL_ACTION_NOTIFY) ? C_MASTER : C_NOTIFY;
 		conf_val_t rmts = conf_zone_get(conf, item, zone_name);
-		allowed = rmt_allowed(conf, &rmts, query_source, &tsig);
+		allowed = rmt_allowed(conf, &rmts, query_source, &tsig,
+		                      qdata->params->quic_conn);
 		automatic = allowed;
 	}
 	if (!allowed) {
 		conf_val_t acl = conf_zone_get(conf, C_ACL, zone_name);
-		allowed = acl_allowed(conf, &acl, action, query_source, &tsig, zone_name, query);
+		allowed = acl_allowed(conf, &acl, action, query_source, &tsig,
+		                      zone_name, query, qdata->params->quic_conn);
 	}
 
-	log_zone_debug(zone_name,
-	               "ACL, %s, action %s, remote %s, key %s%s%s%s",
-	               allowed ? "allowed" : "denied",
-	               (act != NULL) ? act->name : "query",
-	               addr_str,
-	               (key_name[0] != '\0') ? "'" : "",
-	               (key_name[0] != '\0') ? key_name : "none",
-	               (key_name[0] != '\0') ? "'" : "",
-	               automatic ? ", automatic" : "");
+	if (log_enabled_debug()) {
+		int pin_size = 0;
+#ifdef ENABLE_QUIC
+		uint8_t bin_pin[KNOT_QUIC_PIN_LEN], pin[2 * KNOT_QUIC_PIN_LEN];
+		size_t bin_pin_size = sizeof(bin_pin);
+		knot_quic_conn_pin(qdata->params->quic_conn, bin_pin, &bin_pin_size, false);
+		if (bin_pin_size > 0) {
+			pin_size = knot_base64_encode(bin_pin, bin_pin_size, pin, sizeof(pin));
+		}
+#else
+		uint8_t pin[1];
+#endif // ENABLE_QUIC
+
+		log_zone_debug(zone_name,
+		               "ACL, %s, action %s, remote %s%s%s%s%s%.*s%s",
+		               allowed ? "allowed" : "denied",
+		               (act != NULL) ? act->name : "query",
+		               addr_str,
+		               (key_name[0] != '\0') ? ", key " : "",
+		               (key_name[0] != '\0') ? key_name : "",
+		               (qdata->params->proto == KNOTD_QUERY_PROTO_QUIC) ? ", QUIC" : "",
+		               (pin_size > 0) ? " cert-key " : "",
+		               (pin_size > 0) ? pin_size : 0,
+		               (pin_size > 0) ? (const char *)pin : "",
+		               automatic ? ", automatic" : "");
+	}
 
 	/* Check if authorized. */
 	if (!allowed) {
 		qdata->rcode = KNOT_RCODE_NOTAUTH;
-		qdata->rcode_tsig = KNOT_RCODE_BADKEY;
+		/* Don't insert possible TSIG record if generally denied by ACL. */
+		qdata->rcode_tsig = KNOT_RCODE_NOERROR;
+		qdata->sign.tsig_key.name = NULL;
 		return false;
 	}
 
@@ -782,7 +812,7 @@ int process_query_verify(knotd_qdata_t *qdata)
 	if (qdata->rcode == KNOT_RCODE_SERVFAIL) {
 		log_zone_error(qdata->extra->zone->name,
 		               "TSIG, verification failed (%s)", knot_strerror(ret));
-	} else if (qdata->rcode != KNOT_RCODE_NOERROR) {
+	} else if (qdata->rcode != KNOT_RCODE_NOERROR && log_enabled_debug()) {
 		const knot_lookup_t *item = NULL;
 		if (qdata->rcode_tsig != KNOT_RCODE_NOERROR) {
 			item = knot_lookup_by_id(knot_tsig_rcode_names, qdata->rcode_tsig);

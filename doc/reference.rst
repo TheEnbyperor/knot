@@ -176,7 +176,8 @@ General options related to the server.
      proxy-allowlist: ADDR[/INT] | ADDR-ADDR ...
      dbus-event: none | running | zone-updated | ksk-submission | dnssec-invalid ...
      dbus-init-delay: TIME
-     listen: ADDR[@INT] ...
+     listen: ADDR[@INT] | STR ...
+     listen-quic: ADDR[@INT] ...
 
 .. CAUTION::
    When you change configuration parameters dynamically or via configuration file
@@ -527,7 +528,7 @@ A non-absolute path of a user specified key file is relative to the
 
 Change of this parameter requires restart of the Knot server to take effect.
 
-*Default:* one-time in-memory key
+*Default:* auto-generated key
 
 .. _server_cert-file:
 
@@ -606,6 +607,8 @@ Possible values:
   - ``stopped`` when the server shutdown sequence is initiated.
 - ``zone-updated`` – The signal ``zone_updated`` is emitted when a zone has been updated;
   the signal parameters are `zone name` and `zone SOA serial`.
+- ``keys-updated`` - The signal ``keys_updated`` is emitted when a DNSSEC key set 
+  of this zone is updated.
 - ``ksk-submission`` – The signal ``zone_ksk_submission`` is emitted if there is
   a ready KSK present when the zone is signed; the signal parameters are
   `zone name`, `KSK keytag`, and `KSK KASP id`.
@@ -642,12 +645,29 @@ One or more IP addresses where the server listens for incoming queries.
 Optional port specification (default is 53) can be appended to each address
 using ``@`` separator. Use ``0.0.0.0`` for all configured IPv4 addresses or
 ``::`` for all configured IPv6 addresses. Filesystem path can be specified
-for listening on local unix SOCK_STREAM socket. Non-local address binding
-is automatically enabled if supported by the operating system.
+for listening on local unix SOCK_STREAM socket. Non-absolute path
+(i.e. not starting with ``/``) is relative to :ref:`server_rundir`.
+Non-local address binding is automatically enabled if supported by the operating system.
 
 Change of this parameter requires restart of the Knot server to take effect.
 
 *Default:* not set
+
+.. _server_listen-quic:
+
+listen-quic
+-----------
+
+One or more IP addresses (and optionally ports) where the server listens
+for incoming queries over QUIC protocol.
+
+Change of this parameter requires restart of the Knot server to take effect.
+
+*Default:* not set
+
+.. NOTE::
+   Incoming :ref:`DDNS<dynamic updates>` over QUIC isn't supported.
+   The server always responds with SERVFAIL.
 
 .. _xdp section:
 
@@ -664,7 +684,6 @@ Various options related to XDP listening, especially TCP.
      tcp: BOOL
      quic: BOOL
      quic-port: INT
-     quic-log: BOOL
      tcp-max-clients: INT
      tcp-inbuf-max-size: SIZE
      tcp-outbuf-max-size: SIZE
@@ -696,6 +715,10 @@ Change of this parameter requires restart of the Knot server to take effect.
    recommended to also :ref:`listen <server_listen>` on the addresses which are
    intended to offer the DNS service, at least to fulfil the DNS requirement for
    working TCP.
+
+.. NOTE::
+   Incoming :ref:`DDNS<dynamic updates>` over XDP isn't supported.
+   The server always responds with SERVFAIL.
 
 *Default:* not set
 
@@ -749,17 +772,6 @@ but on different port, configured by this option.
 Change of this parameter requires restart of the Knot server to take effect.
 
 *Default:* ``853``
-
-.. _xdp_quic-log:
-
-quic-log
---------
-
-Triggers extensive logging of all QUIC protocol internals for every connection.
-
-Change of this parameter requires restart of the Knot server to take effect.
-
-*Default:* ``off``
 
 .. _xdp_tcp-max-clients:
 
@@ -923,6 +935,7 @@ will be logged to both standard error output and syslog. The ``info`` and
      server: critical | error | warning | notice | info | debug
      control: critical | error | warning | notice | info | debug
      zone: critical | error | warning | notice | info | debug
+     quic: critical | error | warning | notice | info | debug
      any: critical | error | warning | notice | info | debug
 
 .. _log_target:
@@ -974,12 +987,21 @@ Minimum severity level for messages related to zones to be logged.
 
 *Default:* not set
 
+.. _log_quic:
+
+quic
+----
+
+Minimum severity level for messages related to QUIC to be logged.
+
+*Default:* not set
+
 .. _log_any:
 
 any
 ---
 
-Minimum severity level for all message types to be logged.
+Minimum severity level for all message types, except ``quic``, to be logged.
 
 *Default:* not set
 
@@ -1002,7 +1024,7 @@ Periodic server statistics dumping.
 timer
 -----
 
-A period after which all available statistics metrics will by written to the
+A period (in seconds) after which all available statistics metrics will by written to the
 :ref:`file<statistics_file>`.
 
 *Default:* not set
@@ -1300,9 +1322,11 @@ transfer, target for a notification, etc.).
 
  remote:
    - id: STR
-     address: ADDR[@INT] ...
+     address: ADDR[@INT] | STR ...
      via: ADDR[@INT] ...
+     quic: BOOL
      key: key_id
+     cert-key: BASE64 ...
      block-notify-after-transfer: BOOL
      no-edns: BOOL
      automatic-acl: BOOL
@@ -1319,10 +1343,13 @@ A remote identifier.
 address
 -------
 
-An ordered list of destination IP addresses which are used for communication
-with the remote server. The addresses are tried in sequence until the
-remote is reached. Optional destination port (default is 53)
+An ordered list of destination IP addresses or UNIX socket paths which are
+used for communication with the remote server. Non-absolute path
+(i.e. not starting with ``/``) is relative to :ref:`server_rundir`.
+Optional destination port (default is 53 for UDP/TCP and 853 for QUIC)
 can be appended to the address using ``@`` separator.
+The addresses are tried in sequence until the
+remote is reached.
 
 *Default:* not set
 
@@ -1343,6 +1370,22 @@ to the address using ``@`` separator.
 
 *Default:* not set
 
+.. _remote_quic:
+
+quic
+----
+
+If this option is set, the QUIC protocol will be used for outgoing communication
+with this remote.
+
+.. NOTE::
+   One connection per each remote is opened; :ref:`server_remote-pool-limit`
+   does not take effect for QUIC. However, fast QUIC handshakes utilizing obtained
+   session tickets are used for reopening connections to recently (up to 1 day)
+   queried remotes.
+
+*Default:* ``off``
+
 .. _remote_key:
 
 key
@@ -1350,6 +1393,22 @@ key
 
 A :ref:`reference<key_id>` to the TSIG key which is used to authenticate
 the communication with the remote server.
+
+*Default:* not set
+
+.. _remote_cert-key:
+
+cert-key
+--------
+
+An ordered list of remote certificate public key PINs. If the list is non-empty,
+communication with the remote is possible only via QUIC protocol and
+a peer certificate is required. The peer certificate key must match one of the
+specified PINs.
+
+A PIN is a unique identifier that represents the public key of the peer certificate.
+It's a base64-encoded SHA-256 hash of the public key. This identifier
+remains the same on a certificate renewal.
 
 *Default:* not set
 
@@ -1442,8 +1501,9 @@ and dynamic DNS update) which are allowed to be processed or denied.
 
  acl:
    - id: STR
-     address: ADDR[/INT] | ADDR-ADDR ...
+     address: ADDR[/INT] | ADDR-ADDR | STR ...
      key: key_id ...
+     cert-key: BASE64 ...
      remote: remote_id | remotes_id ...
      action: query | notify | transfer | update ...
      deny: BOOL
@@ -1464,7 +1524,8 @@ An ACL rule identifier.
 address
 -------
 
-An ordered list of IP addresses, network subnets, or network ranges. The query's
+An ordered list of IP addresses, absolute UNIX socket paths, network subnets,
+or network ranges. The query's
 source address must match one of them. If this item is not set, address match is not
 required.
 
@@ -1477,6 +1538,22 @@ key
 
 An ordered list of :ref:`reference<key_id>`\ s to TSIG keys. The query must
 match one of them. If this item is not set, transaction authentication is not used.
+
+*Default:* not set
+
+.. _acl_cert-key:
+
+cert-key
+--------
+
+An ordered list of remote certificate public key PINs. If the list is non-empty,
+communication with the remote is possible only via QUIC protocol and
+a peer certificate is required. The peer certificate key must match one of the
+specified PINs.
+
+A PIN is a unique identifier that represents the public key of the peer certificate.
+It's a base64-encoded SHA-256 hash of the public key. This identifier
+remains the same on a certificate renewal.
 
 *Default:* not set
 
@@ -1656,6 +1733,48 @@ parent zone.
 
 *Default:* ``0``
 
+.. _dnskey-sync section:
+
+``dnskey-sync`` section
+=======================
+
+Parameters of DNSKEY dynamic-update synchrnization.
+
+::
+
+ dnskey-sync:
+   - id: STR
+     remote: remote_id | remotes_id ...
+     check-interval: TIME
+
+.. _dnskey-sync_id:
+
+id
+--
+
+A dnskey-sync identifier.
+
+.. _dnskey-sync_remote:
+
+remote
+------
+
+A list of references :ref:`remote<remote_id>` and :ref:`remotes<remotes_id>`
+to other signers or common master, which the DDNS updates with
+DNSKEY/CDNSKEY/CDS records shall be sent to.
+
+*Default:* not set
+
+.. _dnskey-sync_check-interval:
+
+check-interval
+--------------
+
+If the last DNSKEY sync failed or resulted in any change, re-check
+the consistence after this interval and re-try if needed.
+
+*Default:* ``60`` (1 minute)
+
 .. _policy section:
 
 ``policy`` section
@@ -1834,7 +1953,7 @@ Declare (override) maximal TTL value among all the records in zone.
 ksk-lifetime
 ------------
 
-A period between KSK generation and the next rollover initiation.
+A period between KSK activation and the next rollover initiation.
 
 .. NOTE::
    KSK key lifetime is also influenced by propagation-delay, dnskey-ttl,
@@ -2047,6 +2166,16 @@ It's possible to manage both child and parent zones by the same Knot DNS server.
 
 *Default:* not set
 
+.. _policy_dnskey-sync:
+
+dnskey-sync
+-----------
+
+A reference to :ref:`dnskey-sync<dnskey-sync_id>` section holding parameters
+of DNSKEY synchronization.
+
+*Default:* not set
+
 .. _policy_cds-cdnskey-publish:
 
 cds-cdnskey-publish
@@ -2202,6 +2331,7 @@ Definition of zones served by the server.
      ddns-master: remote_id
      notify: remote_id | remotes_id ...
      acl: acl_id ...
+     master-pin-tolerance: TIME
      provide-ixfr: BOOL
      semantic-checks: BOOL | soft
      zonefile-sync: TIME
@@ -2219,6 +2349,7 @@ Definition of zones served by the server.
      zonemd-verify: BOOL
      zonemd-generate: none | zonemd-sha384 | zonemd-sha512 | remove
      serial-policy: increment | unixtime | dateserial
+     serial-modulo: INT/INT
      reverse-generate: DNAME
      refresh-min-interval: TIME
      refresh-max-interval: TIME
@@ -2301,8 +2432,13 @@ An ordered list of references :ref:`remote<remote_id>` and
 ddns-master
 -----------
 
-A :ref:`reference<remote_id>` to zone primary master. If not specified,
-the first :ref:`master<zone_master>` server is used.
+A :ref:`reference<remote_id>` to a zone primary master where DDNS messages
+should be forwarded to. If not specified, the first :ref:`master<zone_master>`
+server is used.
+
+If set to the empty value (""), incoming DDNS messages aren't forwarded but are applied
+to the local zone instead, no matter if it is a secondary server. This is only allowed in
+combination with :ref:`zone_dnssec-signing` enabled.
 
 *Default:* not set
 
@@ -2326,6 +2462,22 @@ An ordered list of :ref:`references<acl_id>` to ACL rules which can allow
 or disallow zone transfers, updates or incoming notifies.
 
 *Default:* not set
+
+.. _zone_master-pin-tolerance:
+
+master-pin-tolerance
+--------------------
+
+If set to a nonzero value on a secondary, always request AXFR/IXFR from the same
+primary as the last time, effectively pinning one primary. Only when another
+primary is updated and the current one lags behind for the specified amount of time
+(defined by this option), change to the updated primary and force AXFR.
+
+This option is useful when multiple primaries may have different zone history
+in their journals, making it unsafe to combine interchanged IXFR
+from different primaries.
+
+*Default:* 0
 
 .. _zone_provide-ixfr:
 
@@ -2424,10 +2576,6 @@ and no zone contents in the journal), it behaves the same way as ``whole``.
 
 *Default:* ``whole``
 
-.. NOTE::
-   See :ref:`Handling, zone file, journal, changes, serials` for guidance on
-   configuring these and related options to ensure reliable operation.
-
 .. _zone_journal-content:
 
 journal-content
@@ -2442,14 +2590,6 @@ Possible values:
 - ``all`` – Zone contents and history is stored in journal.
 
 *Default:* ``changes``
-
-.. WARNING::
-   When this option is changed, the journal still contains data respective to
-   the previous setting. For example, changing it to ``none`` does not purge
-   the journal. Also, changing it from ``all`` to ``changes``
-   does not cause the deletion of the zone-in-journal and the behaviour of the
-   zone loading procedure might be different than expected. It is recommended
-   to consider purging the journal when this option is changed.
 
 .. _zone_journal-max-usage:
 
@@ -2639,19 +2779,41 @@ Possible values:
 
 *Default:* ``increment`` (``unixtime`` for generated catalog zones)
 
+.. _zone_serial-modulo:
+
+serial-modulo
+-------------
+
+Specifies that the zone serials shall be congruent by specified modulo.
+The option value must be a string in the format ``R/M``, where ``R < M <= 256`` are
+positive integers. Whenever the zone serial is incremented, it is ensured
+that ``serial % M == R``. This can be useful in the case of multiple inconsistent
+primaries, where distinct zone serial sequences prevent cross-master-IXFR
+by any secondary.
+
+.. NOTE::
+   In order to ensure the congruent policy, this option is only allowed
+   with :ref:`DNSSEC signing enabled<zone_dnssec-signing>` and
+   :ref:`zone_zonefile-load` to be either ``difference-no-serial`` or ``none``.
+
+   Because the zone serial effectively always increments by ``M`` instead of
+   ``1``, it is not recommended to use ``dateserial`` :ref:`zone_serial-policy`
+   or even ``unixtime`` in case of rapidly updated zone.
+
+*Default:* ``0/1``
+
 .. _zone_reverse-generate:
 
 reverse-generate
 ----------------
 
-Triggers auto-generating reverse PTR records into this zone, based on A/AAAA records
-in the zone specified by this option.
+This option triggers the automatic generation of reverse PTR records based on
+A/AAAA records in the specified zone. The entire generated zone is automatically
+stored in the journal.
 
-Limitations (may be relaxed in the future):
+Current limitations:
 
 - Only one zone to be reversed can be specified.
-- Requires :ref:`zone_journal-content`: ``all`` and
-  :ref:`zone_zonefile-load`: ``difference-no-serial``.
 - Is slow for large zones (even when changing a little).
 
 *Default:* none

@@ -1,4 +1,4 @@
-/*  Copyright (C) 2022 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2023 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -27,6 +27,8 @@
 #include "knot/worker/pool.h"
 #include "knot/zone/backup.h"
 #include "knot/zone/zonedb.h"
+
+#define DFLT_QUIC_KEY_FILE	"quic_key.pem"
 
 struct server;
 struct knot_xdp_socket;
@@ -72,6 +74,8 @@ typedef struct {
 	int *fd_xdp;
 	unsigned fd_xdp_count;
 	unsigned xdp_first_thread_id;
+	bool anyaddr;
+	bool quic;
 	struct knot_xdp_socket **xdp_sockets;
 	struct sockaddr_storage addr;
 } iface_t;
@@ -115,6 +119,7 @@ typedef struct server {
 	/*! \brief List of interfaces. */
 	iface_t *ifaces;
 	size_t n_ifaces;
+	bool quic_active;
 
 	/*! \brief Pending changes to catalog member zones, update indication. */
 	catalog_update_t catalog_upd;
@@ -201,3 +206,14 @@ int server_reconfigure(conf_t *conf, server_t *server);
  * \param mode    Reload mode.
  */
 void server_update_zones(conf_t *conf, server_t *server, reload_t mode);
+
+/*!
+ * \brief Returns current server certificate public key PIN as base64 string.
+ *
+ * \param server    Server instance.
+ * \param out       Output buffer.
+ * \param out_size  Size of the output buffer.
+ *
+ * \return Length of the output PIN string.
+ */
+size_t server_cert_pin(server_t *server, uint8_t *out, size_t out_size);

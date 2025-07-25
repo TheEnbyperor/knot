@@ -1,4 +1,4 @@
-/*  Copyright (C) 2022 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2023 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -206,7 +206,7 @@ static void tcp_table_remove(knot_tcp_conn_t **todel, knot_tcp_table_t *table)
 {
 	assert(table->usage > 0);
 	rem_align_pointers(*todel, table);
-	table->inbufs_total -= (*todel)->inbuf.iov_len;
+	table->inbufs_total -= buffer_alloc_size((*todel)->inbuf.iov_len);
 	table->outbufs_total -= knot_tcp_outbufs_usage((*todel)->outbufs);
 	tcp_table_remove_conn(todel);
 	table->usage--;
@@ -334,8 +334,8 @@ int knot_tcp_recv(knot_tcp_relay_t *relays, knot_xdp_msg_t msgs[], uint32_t msg_
 			if (!(ignore & XDP_TCP_IGNORE_DATA_ACK)) {
 				relay->auto_answer = KNOT_XDP_MSG_ACK;
 			}
-			ret = knot_tcp_inbuf_update(&conn->inbuf, msg->payload, &relay->inbufs,
-			                            &relay->inbufs_count, &tcp_table->inbufs_total);
+			ret = knot_tcp_inbufs_upd(&conn->inbuf, msg->payload, false,
+			                          &relay->inbf, &tcp_table->inbufs_total);
 			if (ret != KNOT_EOK) {
 				break;
 			}
@@ -634,7 +634,7 @@ static void sweep_reset(knot_tcp_table_t *tcp_table, knot_tcp_relay_t *rl,
 	tcp_table_remove(tcp_table_re_lookup(rl->conn, tcp_table), tcp_table); // also updates tcp_table->next_*
 
 	*free_conns -= 1;
-	*free_inbuf -= rl->conn->inbuf.iov_len;
+	*free_inbuf -= buffer_alloc_size(rl->conn->inbuf.iov_len);
 	*free_outbuf -= knot_tcp_outbufs_usage(rl->conn->outbufs);
 
 	knot_sweep_stats_incr(stats, counter);
@@ -662,6 +662,7 @@ int knot_tcp_sweep(knot_tcp_table_t *tcp_table,
 
 	// reset connections to free ibufs
 	while (free_inbuf > 0 && rl != rl_max) {
+		assert(tcp_table->next_ibuf != NULL);
 		if (tcp_table->next_ibuf->inbuf.iov_len == 0) { // this conn might have get rid of ibuf in the meantime
 			next_ptr_ibuf(&tcp_table->next_ibuf);
 		}
@@ -674,6 +675,7 @@ int knot_tcp_sweep(knot_tcp_table_t *tcp_table,
 
 	// reset connections to free obufs
 	while (free_outbuf > 0 && rl != rl_max) {
+		assert(tcp_table->next_obuf != NULL);
 		if (knot_tcp_outbufs_usage(tcp_table->next_obuf->outbufs) == 0) {
 			next_ptr_obuf(&tcp_table->next_obuf);
 		}
@@ -738,7 +740,7 @@ void knot_tcp_cleanup(knot_tcp_table_t *tcp_table, knot_tcp_relay_t relays[],
 
 			del_conn(relays[i].conn);
 		}
-		free(relays[i].inbufs);
+		free(relays[i].inbf);
 	}
 	memset(relays, 0, relay_count * sizeof(relays[0]));
 }

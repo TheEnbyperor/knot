@@ -1,4 +1,4 @@
-/*  Copyright (C) 2022 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2023 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -20,6 +20,7 @@
 #include "knot/conf/conf.h"
 #include "knot/query/query.h"
 #include "knot/query/requestor.h"
+#include "knot/server/server.h"
 #include "knot/zone/zone.h"
 #include "libknot/errcode.h"
 
@@ -35,9 +36,10 @@ struct ds_push_data {
 
 #define DS_PUSH_RETRY	600
 
-#define DS_PUSH_LOG(priority, zone, remote, reused, fmt, ...) \
+#define DS_PUSH_LOG(priority, zone, remote, flags, fmt, ...) \
 	ns_log(priority, zone, LOG_OPERATION_DS_PUSH, LOG_DIRECTION_OUT, remote, \
-	       reused, fmt, ## __VA_ARGS__)
+	       ((flags) & KNOT_REQUESTOR_QUIC) ? KNOTD_QUERY_PROTO_QUIC : KNOTD_QUERY_PROTO_TCP, \
+	       ((flags) & KNOT_REQUESTOR_REUSED), fmt, ## __VA_ARGS__)
 
 static const knot_rdata_t remove_cds = { 5, { 0, 0, 0, 0, 0 } };
 
@@ -54,11 +56,6 @@ static int parent_soa_produce(struct ds_push_data *data, knot_pkt_t *pkt)
 	data->parent_query = knot_wire_next_label(data->parent_query, NULL);
 
 	int ret = knot_pkt_put_question(pkt, data->parent_query, KNOT_CLASS_IN, KNOT_RRTYPE_SOA);
-	if (ret != KNOT_EOK) {
-		return KNOT_STATE_FAIL;
-	}
-
-	ret = query_put_edns(pkt, &data->edns);
 	if (ret != KNOT_EOK) {
 		return KNOT_STATE_FAIL;
 	}
@@ -100,8 +97,6 @@ static int ds_push_produce(knot_layer_t *layer, knot_pkt_t *pkt)
 		}
 	}
 
-	query_put_edns(pkt, &data->edns);
-
 	return KNOT_STATE_CONSUME;
 }
 
@@ -133,8 +128,7 @@ static int ds_push_consume(knot_layer_t *layer, knot_pkt_t *pkt)
 
 	if (data->parent_query[0] == '\0') {
 		// query for parent SOA systematically fails
-		DS_PUSH_LOG(LOG_WARNING, data->zone, data->remote,
-		            layer->flags & KNOT_REQUESTOR_REUSED,
+		DS_PUSH_LOG(LOG_WARNING, data->zone, data->remote, layer->flags,
 		            "unable to query parent SOA");
 		return KNOT_STATE_FAIL;
 	}
@@ -179,7 +173,7 @@ static int send_ds_push(conf_t *conf, zone_t *zone,
 		.parent_query = zone->name,
 		.new_ds = zone_cds,
 		.remote = (struct sockaddr *)&parent->addr,
-		.edns = query_edns_data_init(conf, parent->addr.ss_family, 0)
+		.edns = query_edns_data_init(conf, parent, 0)
 	};
 
 	knot_rrset_init(&data.del_old_ds, zone->name, KNOT_RRTYPE_DS, KNOT_CLASS_ANY, 0);
@@ -198,12 +192,10 @@ static int send_ds_push(conf_t *conf, zone_t *zone,
 		return KNOT_ENOMEM;
 	}
 
-	const struct sockaddr_storage *dst = &parent->addr;
-	const struct sockaddr_storage *src = &parent->via;
-	knot_request_t *req = knot_request_make(NULL, dst, src, pkt, &parent->key, 0);
+	knot_request_t *req = knot_request_make(NULL, parent, pkt,
+	                                        zone->server->quic_creds, &data.edns, 0);
 	if (req == NULL) {
 		knot_rdataset_clear(&data.del_old_ds.rrs, NULL);
-		knot_request_free(req, NULL);
 		knot_requestor_clear(&requestor);
 		return KNOT_ENOMEM;
 	}
@@ -211,16 +203,13 @@ static int send_ds_push(conf_t *conf, zone_t *zone,
 	ret = knot_requestor_exec(&requestor, req, timeout);
 
 	if (ret == KNOT_EOK && knot_pkt_ext_rcode(req->resp) == 0) {
-		DS_PUSH_LOG(LOG_INFO, zone->name, dst,
-		            requestor.layer.flags & KNOT_REQUESTOR_REUSED,
+		DS_PUSH_LOG(LOG_INFO, zone->name, &parent->addr, requestor.layer.flags,
 		            "success");
 	} else if (knot_pkt_ext_rcode(req->resp) == 0) {
-		DS_PUSH_LOG(LOG_WARNING, zone->name, dst,
-		            requestor.layer.flags & KNOT_REQUESTOR_REUSED,
+		DS_PUSH_LOG(LOG_WARNING, zone->name, &parent->addr, requestor.layer.flags,
 		            "failed (%s)", knot_strerror(ret));
 	} else {
-		DS_PUSH_LOG(LOG_WARNING, zone->name, dst,
-		            requestor.layer.flags & KNOT_REQUESTOR_REUSED,
+		DS_PUSH_LOG(LOG_WARNING, zone->name, &parent->addr, requestor.layer.flags,
 		            "server responded with error '%s'",
 		            knot_pkt_ext_rcode_name(req->resp));
 	}

@@ -1,4 +1,4 @@
-/*  Copyright (C) 2022 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2023 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -36,9 +36,8 @@ void quic_params_clean(quic_params_t *params);
 #include "utils/common/tls.h"
 
 #define QUIC_DEFAULT_VERSION "-VERS-ALL:+VERS-TLS1.3"
-#define QUIC_DEFAULT_CIPHERS "-CIPHER-ALL:+AES-128-GCM:+AES-256-GCM:+CHACHA20-POLY1305:+AES-128-CCM"
-#define QUIC_DEFAULT_GROUPS  "-GROUP-ALL:+GROUP-SECP256R1:+GROUP-X25519:+GROUP-SECP384R1:+GROUP-SECP521R1"
-#define QUIC_PRIORITY        "%DISABLE_TLS13_COMPAT_MODE:NORMAL:"QUIC_DEFAULT_VERSION":"QUIC_DEFAULT_CIPHERS":"QUIC_DEFAULT_GROUPS
+#define QUIC_DEFAULT_GROUPS  "-GROUP-ALL:+GROUP-X25519:+GROUP-SECP256R1:+GROUP-SECP384R1:+GROUP-SECP521R1"
+#define QUIC_PRIORITY        "%DISABLE_TLS13_COMPAT_MODE:NORMAL:"QUIC_DEFAULT_VERSION":"QUIC_DEFAULT_GROUPS
 
 typedef enum {
 	OPENING,
@@ -81,13 +80,12 @@ typedef struct {
 		int64_t id;
 		uint64_t out_ack;
 		struct iovec in_buffer;
-		struct iovec *in_parsed;
-		size_t in_parsed_size;
-		size_t in_parsed_total;
+		struct knot_tcp_inbufs_upd_res *in_parsed;
 		size_t in_parsed_it;
+		size_t in_parsed_total;
 		int resets;
 	} stream;
-	ngtcp2_connection_close_error last_err;
+	ngtcp2_ccerr last_err;
 	uint8_t secret[32];
 	tls_ctx_t *tls;
 	ngtcp2_conn *conn;
@@ -96,15 +94,13 @@ typedef struct {
 	uint64_t idle_ts;
 } quic_ctx_t;
 
-extern const gnutls_datum_t doq_alpn[];
+extern const gnutls_datum_t doq_alpn;
 
 uint64_t quic_timestamp(void);
 
 int quic_generate_secret(uint8_t *buf, size_t buflen);
 
 uint32_t quic_get_ecn(struct msghdr *msg, const int family);
-
-int quic_set_enc(int sockfd, int family, uint32_t ecn);
 
 int quic_ctx_init(quic_ctx_t *ctx, tls_ctx_t *tls_ctx, const quic_params_t *params);
 

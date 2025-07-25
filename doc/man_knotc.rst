@@ -70,7 +70,8 @@ Actions
 **status** [*detail*]
   Check if the server is running. Details are **version** for the running
   server version, **workers** for the numbers of worker threads,
-  or **configure** for the configure summary.
+  **configure** for the configure summary, or **cert-key** for the
+  public key pin of the currently used certificate.
 
 **stop**
   Stop the server if running.
@@ -131,16 +132,17 @@ Actions
 **zone-backup** [*zone*...] **+backupdir** *directory* [*filter*...]
   Trigger a zone data and metadata backup to a specified directory.
   Available filters are **+zonefile**, **+journal**, **+timers**, **+kaspdb**,
-  **+catalog**, and their negative counterparts **+nozonefile**, **+nojournal**,
-  **+notimers**, **+nokaspdb**, and **+nocatalog**. With these filters set,
-  zone contents, zone's journal, zone related timers, zone related data in the
-  KASP database together with keys, and zone's catalog, respectively, are backed up,
+  **+catalog**, **+quic**, and their negative counterparts **+nozonefile**,
+  **+nojournal**, **+notimers**, **+nokaspdb**, **+nocatalog**, and **+noquic**.
+  With these filters set, zone contents, zone's journal, zone-related timers,
+  zone-related data in the KASP database together with keys, zone's catalog,
+  and the server QUIC key and certificate, respectively, are backed up,
   or omitted from the backup. By default, filters **+zonefile**, **+timers**,
-  **+kaspdb**, **+catalog**, and **+nojournal** are set. Setting a filter
-  for an item doesn't change default settings for other items. If zone flushing
-  is disabled, original zone file is backed up instead of writing out zone
-  contents to a file. See :ref:`Notes<notes>` below about the directory
-  permissions. (#)
+  **+kaspdb**, **+catalog**, **+nojournal**, and **+noquic** are set. Setting
+  a filter for an item doesn't change default settings for other items.
+  If zone flushing is disabled, the original zone file is backed up instead of
+  writing out zone contents to a file. See :ref:`Notes<notes>` below about
+  the directory permissions. (#)
 
 **zone-restore** [*zone*...] **+backupdir** *directory* [*filter*...]
   Trigger a zone data and metadata restore from a specified backup directory.

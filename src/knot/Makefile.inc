@@ -82,6 +82,7 @@ libknotd_la_SOURCES = \
 	knot/events/events.h			\
 	knot/events/handlers.h			\
 	knot/events/handlers/backup.c		\
+	knot/events/handlers/dnskey_sync.c	\
 	knot/events/handlers/dnssec.c		\
 	knot/events/handlers/ds_check.c		\
 	knot/events/handlers/ds_push.c		\
@@ -152,6 +153,8 @@ libknotd_la_SOURCES = \
 	knot/journal/serialization.h		\
 	knot/server/dthreads.c			\
 	knot/server/dthreads.h			\
+	knot/server/handler.c			\
+	knot/server/handler.h			\
 	knot/server/proxyv2.c			\
 	knot/server/proxyv2.h			\
 	knot/server/server.c			\
@@ -216,6 +219,14 @@ libknotd_la_SOURCES = \
 	knot/zone/zonedb.h			\
 	knot/zone/zonefile.c			\
 	knot/zone/zonefile.h
+
+if ENABLE_QUIC
+libknotd_la_SOURCES += \
+	knot/query/quic-requestor.c		\
+	knot/query/quic-requestor.h		\
+	knot/server/quic-handler.c		\
+	knot/server/quic-handler.h
+endif ENABLE_QUIC
 
 if HAVE_DAEMON
 noinst_LTLIBRARIES += libknotd.la

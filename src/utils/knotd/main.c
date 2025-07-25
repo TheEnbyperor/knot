@@ -1,4 +1,4 @@
-/*  Copyright (C) 2022 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2023 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -494,7 +494,7 @@ int main(int argc, char **argv)
 	}
 
 	/* Set file creation mask to remove all permissions for others. */
-	umask(S_IROTH|S_IWOTH|S_IXOTH);
+	umask(S_IROTH | S_IWOTH | S_IXOTH);
 
 	/* Now check if we want to daemonize. */
 	if (daemonize) {
@@ -563,7 +563,6 @@ int main(int argc, char **argv)
 		server_wait(&server);
 		server_deinit(&server);
 		conf_free(conf());
-		systemd_dbus_close();
 		log_close();
 		dnssec_crypto_cleanup();
 		return EXIT_FAILURE;

@@ -1,4 +1,4 @@
-/*  Copyright (C) 2022 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2023 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -70,11 +70,23 @@ int check_ref_dflt(
 	knotd_conf_check_args_t *args
 );
 
+int check_ref_empty(
+	knotd_conf_check_args_t *args
+);
+
 int check_listen(
 	knotd_conf_check_args_t *args
 );
 
 int check_xdp_listen(
+	knotd_conf_check_args_t *args
+);
+
+int check_cert_pin(
+	knotd_conf_check_args_t *args
+);
+
+int check_modulo(
 	knotd_conf_check_args_t *args
 );
 
@@ -87,10 +99,6 @@ int check_modref(
 );
 
 int check_module_id(
-	knotd_conf_check_args_t *args
-);
-
-int check_file(
 	knotd_conf_check_args_t *args
 );
 
@@ -123,6 +131,10 @@ int check_remote(
 );
 
 int check_remotes(
+	knotd_conf_check_args_t *args
+);
+
+int check_dnskey_sync(
 	knotd_conf_check_args_t *args
 );
 

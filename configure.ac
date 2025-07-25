@@ -1,8 +1,8 @@
 AC_PREREQ([2.69])
 
 m4_define([knot_VERSION_MAJOR], 3)dnl
-m4_define([knot_VERSION_MINOR], 2)dnl
-m4_define([knot_VERSION_PATCH], 13)dnl Leave empty if the master branch!
+m4_define([knot_VERSION_MINOR], 3)dnl
+m4_define([knot_VERSION_PATCH], 0)dnl Leave empty if the master branch!
 m4_include([m4/knot-version.m4])
 
 AC_INIT([knot], [knot_PKG_VERSION], [knot-dns@labs.nic.cz])
@@ -16,7 +16,7 @@ AC_CANONICAL_HOST
 
 # Update library versions
 # https://www.gnu.org/software/libtool/manual/html_node/Updating-version-info.html
-KNOT_LIB_VERSION([libknot],    13, 0, 0)
+KNOT_LIB_VERSION([libknot],    14, 0, 0)
 KNOT_LIB_VERSION([libdnssec],   9, 0, 0)
 KNOT_LIB_VERSION([libzscanner], 4, 0, 0)
 
@@ -207,33 +207,31 @@ AC_ARG_ENABLE([xdp],
    AS_HELP_STRING([--enable-xdp=auto|yes|no], [enable eXpress Data Path [default=auto]]),
    [], [enable_xdp=auto])
 
+PKG_CHECK_MODULES([libbpf], [libbpf],
+   [save_LIBS=$LIBS
+    LIBS="$LIBS $libbpf_LIBS"
+    AC_CHECK_FUNC([bpf_object__find_map_by_offset], [libbpf1=no], [libbpf1=yes])
+    LIBS=$save_LIBS
+    have_libbpf=yes],
+   [have_libbpf=no]
+)
+
 AS_CASE([$enable_xdp],
-   [auto], [PKG_CHECK_MODULES([libbpf], [libbpf >= 0.0.6], [enable_xdp=yes], [enable_xdp=no])],
-   [yes], [PKG_CHECK_MODULES([libbpf], [libbpf >= 0.0.6], [enable_xdp=yes],
-             [PKG_CHECK_MODULES([libelf], [libelf],
-                [AC_CHECK_FUNC([reallocarray],
-                   [enable_xdp=embedded
-                    embedded_libbpf_CFLAGS="-I\$(top_srcdir)/src/contrib/libbpf/include -I\$(top_srcdir)/src/contrib/libbpf/include/uapi"
-                    embedded_libbpf_LIBS=$libelf_LIBS
-                    libbpf_CFLAGS="-I\$(top_srcdir)/src/contrib/libbpf -I\$(top_srcdir)/src/contrib/libbpf/include/uapi"],
-                   [enable_xdp=no
-                    AC_MSG_WARN([reallocarray not available])])],
-                [AC_MSG_ERROR([libelf is required])])])],
+   [auto], [AS_IF([test "$have_libbpf" = "yes"], [enable_xdp=yes], [enable_xdp=no])],
+   [yes],  [AS_IF([test "$have_libbpf" = "yes"], [enable_xdp=yes], [AC_MSG_ERROR([libbpf not available])])],
    [no], [],
    [*], [AC_MSG_ERROR([Invalid value of --enable-xdp.])]
 )
-AM_CONDITIONAL([EMBEDDED_LIBBPF], [test "$enable_xdp" = "embedded"])
 AM_CONDITIONAL([ENABLE_XDP], [test "$enable_xdp" != "no"])
-AC_SUBST([embedded_libbpf_CFLAGS])
-AC_SUBST([embedded_libbpf_LIBS])
 
 AS_IF([test "$enable_xdp" = "yes"], [
    PKG_CHECK_MODULES([libxdp], [libxdp], [enable_xdp=libxdp], [enable_xdp=yes])
-   AS_IF([test "$enable_xdp" = "libxdp"], [
-      AC_DEFINE([USE_LIBXDP], [1], [Use external libxdp and libbpf.])
-      libbpf_CFLAGS="$libbpf_CFLAGS $libxdp_CFLAGS"
-      libbpf_LIBS="$libbpf_LIBS $libxdp_LIBS"
-   ])]
+   AS_IF([test "$enable_xdp" = "libxdp"],
+      [AC_DEFINE([USE_LIBXDP], [1], [Use libxdp.])
+       libbpf_CFLAGS="$libbpf_CFLAGS $libxdp_CFLAGS"
+       libbpf_LIBS="$libbpf_LIBS $libxdp_LIBS"],
+      [AS_IF([test "$libbpf1" = "yes"], [AC_MSG_ERROR([libxdp not available])])]
+   )]
 )
 AC_SUBST([libbpf_CFLAGS])
 AC_SUBST([libbpf_LIBS])
@@ -573,19 +571,23 @@ AS_IF([test "$enable_daemon" = "yes" -o "$enable_utilities" = "yes"], [
 
 # QUIC support
 AC_ARG_ENABLE([quic],
-   AS_HELP_STRING([--enable-quic=auto|yes|no], [Support DoQ (needs libngtcp2 = 0.13.1, gnutls >= 3.7.2) [default=auto]]),
+   AS_HELP_STRING([--enable-quic=auto|yes|no|embedded], [Support DoQ (needs libngtcp2 >= 0.17.0, gnutls >= 3.7.3) [default=auto]]),
    [], [enable_quic=auto])
 
 AS_CASE([$enable_quic],
-   [auto], [PKG_CHECK_MODULES([libngtcp2], [libngtcp2 = 0.13.1 libngtcp2_crypto_gnutls], [enable_quic=yes], [enable_quic=no])],
-   [yes], [PKG_CHECK_MODULES([libngtcp2], [libngtcp2 = 0.13.1 libngtcp2_crypto_gnutls], [enable_quic=yes],
+   [auto], [PKG_CHECK_MODULES([libngtcp2], [libngtcp2 >= 0.17.0 libngtcp2_crypto_gnutls], [enable_quic=yes], [enable_quic=no])],
+   [yes],  [PKG_CHECK_MODULES([libngtcp2], [libngtcp2 >= 0.17.0 libngtcp2_crypto_gnutls], [enable_quic=yes],
              AS_IF([test "$gnutls_quic" = "yes"],
                 [enable_quic=embedded
                  embedded_libngtcp2_CFLAGS="-I\$(top_srcdir)/src/contrib/libngtcp2 -I\$(top_srcdir)/src/contrib/libngtcp2/ngtcp2/lib"
                  embedded_libngtcp2_LIBS=$libelf_LIBS
                  libngtcp2_CFLAGS="-I\$(top_srcdir)/src/contrib/libngtcp2"],
                 [enable_quic=no
-                 AC_MSG_WARN([gnutls >= 3.7.2 is required for QUIC])]))],
+                 AC_MSG_WARN([gnutls >= 3.7.3 is required for QUIC])]))],
+   [embedded], [enable_quic=embedded
+                embedded_libngtcp2_CFLAGS="-I\$(top_srcdir)/src/contrib/libngtcp2 -I\$(top_srcdir)/src/contrib/libngtcp2/ngtcp2/lib"
+                embedded_libngtcp2_LIBS=$libelf_LIBS
+                libngtcp2_CFLAGS="-I\$(top_srcdir)/src/contrib/libngtcp2"],
    [no], [],
    [*], [AC_MSG_ERROR([Invalid value of --enable-quic.])]
 )
@@ -723,7 +725,7 @@ AC_HEADER_RESOLV
 AC_CHECK_HEADERS_ONCE([pthread_np.h stdatomic.h sys/uio.h bsd/string.h])
 
 # Checks for optional library functions.
-AC_CHECK_FUNCS([accept4 clock_gettime fgetln getline initgroups malloc_trim \
+AC_CHECK_FUNCS([accept4 fgetln getline initgroups malloc_trim \
                 setgroups strlcat strlcpy sysctlbyname])
 
 # Check for robust memory cleanup implementations.
@@ -855,8 +857,13 @@ AC_CONFIG_FILES([Makefile
                  samples/Makefile
                  distro/Makefile
                  python/Makefile
-                 python/setup.py
-                 python/libknot/__init__.py
+                 python/knot_exporter/Makefile
+                 python/knot_exporter/pyproject.toml
+                 python/knot_exporter/setup.py
+                 python/libknot/Makefile
+                 python/libknot/pyproject.toml
+                 python/libknot/setup.py
+                 python/libknot/libknot/__init__.py
                  src/Makefile
                  src/libknot/xdp/Makefile
                  src/knot/modules/static_modules.h

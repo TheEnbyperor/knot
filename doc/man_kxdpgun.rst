@@ -79,6 +79,28 @@ Options
 **-v**, **--vlan** *id*
   Add VLAN 802.1Q header with the given id. VLAN offloading should be disabled.
 
+**-m**, **--mode** *mode*
+  Set the XDP mode. Supported values are:
+
+  - **auto** (default) – the XDP mode is selected automatically to achieve
+    the best performance, which means that native driver support is preferred
+    over the generic one, and zero-copy is used if available.
+
+  - **copy** – the XDP socket copy mode is forced even if zero-copy
+    is available. This can resolve various driver issues, but at the cost
+    of lower performance.
+
+  - **generic** – the generic XDP implementation is forced even if native
+    implementation is available. This mode doesn't require support from the
+    driver nor hardware, but offers the worst performance.
+
+**-G**, **--qlog** *path*
+  Generate qlog files in the directory specified by *path*. The directory
+  has to exist.
+
+  This option is ignored if not in the QUIC mode. The recommended usage is
+  with **--quic=R** or with low QPS. Otherwise, too many files are generated.
+
 **-h**, **--help**
   Print the program help.
 
@@ -121,10 +143,13 @@ TCP/QUIC debug modes
   Send query and don't ACK the response or anything further.
 
 **8**
-  Don't close the connection and ignore close by counterpart (TCP only).
+  Don't close the connection and ignore close by counterpart.
 
 **9**
   Operate normally except for not ACKing the final FIN+ACK (TCP only).
+
+**R**
+  Instead of opening a connection for each query, reuse connections.
 
 Signals
 .......

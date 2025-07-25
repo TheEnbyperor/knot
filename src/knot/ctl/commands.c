@@ -1,4 +1,4 @@
-/*  Copyright (C) 2022 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2023 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -81,7 +81,6 @@ static struct {
  *
  * \return false if there is a filter conflict, true otherwise.
  */
-
 static bool eval_opposite_filters(ctl_args_t *args, bool *param, bool dflt,
                                   int filter, int neg_filter)
 {
@@ -517,7 +516,8 @@ static int init_backup(ctl_args_t *args, bool restore_mode)
 	}
 
 	// Evaluate filters (and possibly fail) before writing to the filesystem.
-	bool filter_zonefile, filter_journal, filter_timers, filter_kaspdb, filter_catalog;
+	bool filter_zonefile, filter_journal, filter_timers, filter_kaspdb,
+	     filter_catalog, filter_quic;
 
 	// The default filter values are set just in this paragraph.
 	if (!(eval_opposite_filters(args, &filter_zonefile, true,
@@ -529,7 +529,9 @@ static int init_backup(ctl_args_t *args, bool restore_mode)
 	    eval_opposite_filters(args, &filter_kaspdb, true,
 	                          CTL_FILTER_BACKUP_KASPDB, CTL_FILTER_BACKUP_NOKASPDB) &&
 	    eval_opposite_filters(args, &filter_catalog, true,
-	                          CTL_FILTER_BACKUP_CATALOG, CTL_FILTER_BACKUP_NOCATALOG))) {
+	                          CTL_FILTER_BACKUP_CATALOG, CTL_FILTER_BACKUP_NOCATALOG) &&
+	    eval_opposite_filters(args, &filter_quic, false,
+	                          CTL_FILTER_BACKUP_QUIC, CTL_FILTER_BACKUP_NOQUIC))) {
 		return KNOT_EXPARAM;
 	}
 
@@ -557,6 +559,7 @@ static int init_backup(ctl_args_t *args, bool restore_mode)
 	ctx->backup_timers = filter_timers;
 	ctx->backup_kaspdb = filter_kaspdb;
 	ctx->backup_catalog = filter_catalog;
+	ctx->backup_quic = filter_quic;
 
 	zone_backups_add(&args->server->backup_ctxs, ctx);
 
@@ -627,9 +630,21 @@ static int zones_apply_backup(ctl_args_t *args, bool restore_mode)
 		return KNOT_CTL_EZONE;
 	}
 
+	zone_backup_ctx_t *ctx = latest_backup_ctx(args);
+
+	/* QUIC - server key and cert backup. */
+	ret = backup_quic(ctx, args->server->quic_active);
+	if (ret != KNOT_EOK) {
+		log_ctl_error("control, QUIC %s error (%s)",
+		              restore_mode ? "restore" : "backup",
+		              knot_strerror(ret));
+		send_error(args, knot_strerror(ret));
+		ret = KNOT_EOK;
+		goto done;
+	}
+
 	/* Global catalog zones backup. */
 	if (args->data[KNOT_CTL_IDX_ZONE] == NULL) {
-		zone_backup_ctx_t *ctx = latest_backup_ctx(args);
 		ctx->backup_global = true;
 		ret = global_backup(ctx, &args->server->catalog, NULL);
 		if (ret != KNOT_EOK) {
@@ -1649,7 +1664,7 @@ static int send_stats_ctr(mod_ctr_t *ctr, uint64_t **stats_vals, unsigned thread
 	return KNOT_EOK;
 }
 
-static int modules_stats(list_t *query_modules, ctl_args_t *args, knot_dname_t *zone)
+static int modules_stats(list_t *query_modules, ctl_args_t *args, knot_ctl_data_t *data)
 {
 	if (query_modules == NULL) {
 		return KNOT_EOK;
@@ -1657,9 +1672,6 @@ static int modules_stats(list_t *query_modules, ctl_args_t *args, knot_dname_t *
 
 	const char *section = args->data[KNOT_CTL_IDX_SECTION];
 	const char *item = args->data[KNOT_CTL_IDX_ITEM];
-
-	knot_dname_txt_storage_t name = "";
-	knot_ctl_data_t data = { 0 };
 
 	bool section_found = (section == NULL) ? true : false;
 	bool item_found = (item == NULL) ? true : false;
@@ -1682,7 +1694,7 @@ static int modules_stats(list_t *query_modules, ctl_args_t *args, knot_dname_t *
 			}
 		}
 
-		data[KNOT_CTL_IDX_SECTION] = mod->id->name + 1;
+		(*data)[KNOT_CTL_IDX_SECTION] = mod->id->name + 1;
 
 		unsigned threads = knotd_mod_threads(mod);
 
@@ -1705,18 +1717,10 @@ static int modules_stats(list_t *query_modules, ctl_args_t *args, knot_dname_t *
 				}
 			}
 
-			// Prepare zone name if not already prepared.
-			if (zone != NULL && name[0] == '\0') {
-				if (knot_dname_to_str(name, zone, sizeof(name)) == NULL) {
-					return KNOT_EINVAL;
-				}
-				data[KNOT_CTL_IDX_ZONE] = name;
-			}
-
-			data[KNOT_CTL_IDX_ITEM] = ctr->name;
+			(*data)[KNOT_CTL_IDX_ITEM] = ctr->name;
 
 			// Send the counters.
-			int ret = send_stats_ctr(ctr, mod->stats_vals, threads, args, &data);
+			int ret = send_stats_ctr(ctr, mod->stats_vals, threads, args, data);
 			if (ret != KNOT_EOK) {
 				return ret;
 			}
@@ -1726,9 +1730,87 @@ static int modules_stats(list_t *query_modules, ctl_args_t *args, knot_dname_t *
 	return (section_found && item_found) ? KNOT_EOK : KNOT_ENOENT;
 }
 
+static int common_stats(ctl_args_t *args, zone_t *zone)
+{
+	const char *section = args->data[KNOT_CTL_IDX_SECTION];
+	const char *item = args->data[KNOT_CTL_IDX_ITEM];
+
+	char value[32];
+	knot_ctl_data_t data = {
+		[KNOT_CTL_IDX_DATA] = value
+	};
+
+	knot_dname_txt_storage_t name = "";
+	if (zone != NULL) {
+		if (knot_dname_to_str(name, zone->name, sizeof(name)) == NULL) {
+			return KNOT_EINVAL;
+		}
+		data[KNOT_CTL_IDX_ZONE] = name;
+	}
+
+	bool found = (section == NULL) ? true : false;
+
+	// Process zone metrics.
+	const char *section_name = (zone != NULL) ? "zone" : "server";
+	if (section == NULL || strcasecmp(section, section_name) == 0) {
+		data[KNOT_CTL_IDX_SECTION] = section_name;
+
+		const stats_item_t *items = (zone != NULL) ? zone_contents_stats :
+		                                             server_stats;
+		for (const stats_item_t *i = items; i->name != NULL; i++) {
+			if (item != NULL) {
+				if (found) {
+					break;
+				} else if (strcmp(i->name, item) == 0) {
+					found = true;
+				} else {
+					continue;
+				}
+			} else {
+				found = true;
+			}
+
+			data[KNOT_CTL_IDX_ITEM] = i->name;
+			int ret = snprintf(value, sizeof(value), "%"PRIu64,
+			                   (zone != NULL) ? i->zone_val(zone) :
+			                                    i->server_val(args->server));
+			if (ret <= 0 || ret >= sizeof(value)) {
+				ret = KNOT_ESPACE;
+				send_error(args, knot_strerror(ret));
+				return ret;
+			}
+
+			ret = knot_ctl_send(args->ctl, KNOT_CTL_TYPE_DATA, &data);
+			if (ret != KNOT_EOK) {
+				send_error(args, knot_strerror(ret));
+				return ret;
+			}
+		}
+	}
+
+	if (section == NULL || strncasecmp(section, "mod-", strlen("mod-")) == 0) {
+		list_t *query_modules = (zone != NULL) ? &zone->query_modules :
+		                                         conf()->query_modules;
+		int ret = modules_stats(query_modules, args, &data);
+		if (ret != KNOT_EOK) {
+			send_error(args, knot_strerror(ret));
+			return ret;
+		}
+
+		found = true;
+	}
+
+	if (!found) {
+		send_error(args, knot_strerror(KNOT_EINVAL));
+		return KNOT_EINVAL;
+	}
+
+	return KNOT_EOK;
+}
+
 static int zone_stats(zone_t *zone, ctl_args_t *args)
 {
-	return modules_stats(&zone->query_modules, args, zone->name);
+	return common_stats(args, zone);
 }
 
 static int ctl_zone(ctl_args_t *args, ctl_cmd_t cmd)
@@ -1808,7 +1890,7 @@ static int server_status(ctl_args_t *args)
 
 	int ret;
 	if (strcasecmp(type, "version") == 0) {
-		ret = snprintf(buff, sizeof(buff), "Version: %s", PACKAGE_VERSION);
+		ret = snprintf(buff, sizeof(buff), "%s", PACKAGE_VERSION);
 	} else if (strcasecmp(type, "workers") == 0) {
 		int running_bkg_wrk, wrk_queue;
 		worker_pool_status(args->server->workers, false, &running_bkg_wrk, &wrk_queue);
@@ -1819,6 +1901,14 @@ static int server_status(ctl_args_t *args)
 		               running_bkg_wrk, wrk_queue);
 	} else if (strcasecmp(type, "configure") == 0) {
 		ret = snprintf(buff, sizeof(buff), "%s", CONFIGURE_SUMMARY);
+	} else if (strcasecmp(type, "cert-key") == 0) {
+		uint8_t pin[128];
+		size_t pin_len = server_cert_pin(args->server, pin, sizeof(pin));
+		if (pin_len > 0) {
+			ret = snprintf(buff, sizeof(buff), "%.*s", (int)pin_len, pin);
+		} else {
+			ret = snprintf(buff, sizeof(buff), STATUS_EMPTY);
+		}
 	} else {
 		return KNOT_EINVAL;
 	}
@@ -1859,68 +1949,9 @@ static int ctl_server(ctl_args_t *args, ctl_cmd_t cmd)
 	return ret;
 }
 
-static int ctl_stats(ctl_args_t *args, ctl_cmd_t cmd)
+static int ctl_stats(ctl_args_t *args, _unused_ ctl_cmd_t cmd)
 {
-	const char *section = args->data[KNOT_CTL_IDX_SECTION];
-	const char *item = args->data[KNOT_CTL_IDX_ITEM];
-
-	bool found = (section == NULL) ? true : false;
-
-	// Process server metrics.
-	if (section == NULL || strcasecmp(section, "server") == 0) {
-		char value[32];
-		knot_ctl_data_t data = {
-			[KNOT_CTL_IDX_SECTION] = "server",
-			[KNOT_CTL_IDX_DATA] = value
-		};
-
-		for (const stats_item_t *i = server_stats; i->name != NULL; i++) {
-			if (item != NULL) {
-				if (found) {
-					break;
-				} else if (strcmp(i->name, item) == 0) {
-					found = true;
-				} else {
-					continue;
-				}
-			} else {
-				found = true;
-			}
-
-			data[KNOT_CTL_IDX_ITEM] = i->name;
-			int ret = snprintf(value, sizeof(value), "%"PRIu64,
-			                   i->val(args->server));
-			if (ret <= 0 || ret >= sizeof(value)) {
-				ret = KNOT_ESPACE;
-				send_error(args, knot_strerror(ret));
-				return ret;
-			}
-
-			ret = knot_ctl_send(args->ctl, KNOT_CTL_TYPE_DATA, &data);
-			if (ret != KNOT_EOK) {
-				send_error(args, knot_strerror(ret));
-				return ret;
-			}
-		}
-	}
-
-	// Process modules metrics.
-	if (section == NULL || strncasecmp(section, "mod-", strlen("mod-")) == 0) {
-		int ret = modules_stats(conf()->query_modules, args, NULL);
-		if (ret != KNOT_EOK) {
-			send_error(args, knot_strerror(ret));
-			return ret;
-		}
-
-		found = true;
-	}
-
-	if (!found) {
-		send_error(args, knot_strerror(KNOT_EINVAL));
-		return KNOT_EINVAL;
-	}
-
-	return KNOT_EOK;
+	return common_stats(args, NULL);
 }
 
 static int send_block_data(conf_io_t *io, knot_ctl_data_t *data)

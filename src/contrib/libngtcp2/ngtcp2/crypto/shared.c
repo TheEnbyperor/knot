@@ -64,11 +64,9 @@ int ngtcp2_crypto_hkdf_expand_label(uint8_t *dest, size_t destlen,
                                    (size_t)(p - info));
 }
 
-#define NGTCP2_CRYPTO_INITIAL_SECRETLEN 32
-
-int ngtcp2_crypto_derive_initial_secrets(uint32_t version, uint8_t *rx_secret,
-                                         uint8_t *tx_secret,
+int ngtcp2_crypto_derive_initial_secrets(uint8_t *rx_secret, uint8_t *tx_secret,
                                          uint8_t *initial_secret,
+                                         uint32_t version,
                                          const ngtcp2_cid *client_dcid,
                                          ngtcp2_crypto_side side) {
   static const uint8_t CLABEL[] = "client in";
@@ -88,6 +86,7 @@ int ngtcp2_crypto_derive_initial_secrets(uint32_t version, uint8_t *rx_secret,
 
   switch (version) {
   case NGTCP2_PROTO_VER_V1:
+  default:
     salt = (const uint8_t *)NGTCP2_INITIAL_SALT_V1;
     saltlen = sizeof(NGTCP2_INITIAL_SALT_V1) - 1;
     break;
@@ -95,9 +94,6 @@ int ngtcp2_crypto_derive_initial_secrets(uint32_t version, uint8_t *rx_secret,
     salt = (const uint8_t *)NGTCP2_INITIAL_SALT_V2;
     saltlen = sizeof(NGTCP2_INITIAL_SALT_V2) - 1;
     break;
-  default:
-    salt = (const uint8_t *)NGTCP2_INITIAL_SALT_DRAFT;
-    saltlen = sizeof(NGTCP2_INITIAL_SALT_DRAFT) - 1;
   }
 
   if (ngtcp2_crypto_hkdf_extract(initial_secret, &ctx.md, client_dcid->data,
@@ -188,14 +184,27 @@ int ngtcp2_crypto_derive_packet_protection_key(
   return 0;
 }
 
-int ngtcp2_crypto_update_traffic_secret(uint8_t *dest,
+int ngtcp2_crypto_update_traffic_secret(uint8_t *dest, uint32_t version,
                                         const ngtcp2_crypto_md *md,
                                         const uint8_t *secret,
                                         size_t secretlen) {
   static const uint8_t LABEL[] = "quic ku";
+  static const uint8_t LABEL_V2[] = "quicv2 ku";
+  const uint8_t *label;
+  size_t labellen;
+
+  switch (version) {
+  case NGTCP2_PROTO_VER_V2:
+    label = LABEL_V2;
+    labellen = sizeof(LABEL_V2) - 1;
+    break;
+  default:
+    label = LABEL;
+    labellen = sizeof(LABEL) - 1;
+  }
 
   if (ngtcp2_crypto_hkdf_expand_label(dest, secretlen, md, secret, secretlen,
-                                      LABEL, sizeof(LABEL) - 1) != 0) {
+                                      label, labellen) != 0) {
     return -1;
   }
 
@@ -204,7 +213,7 @@ int ngtcp2_crypto_update_traffic_secret(uint8_t *dest,
 
 int ngtcp2_crypto_derive_and_install_rx_key(ngtcp2_conn *conn, uint8_t *key,
                                             uint8_t *iv, uint8_t *hp_key,
-                                            ngtcp2_crypto_level level,
+                                            ngtcp2_encryption_level level,
                                             const uint8_t *secret,
                                             size_t secretlen) {
   const ngtcp2_crypto_ctx *ctx;
@@ -220,7 +229,7 @@ int ngtcp2_crypto_derive_and_install_rx_key(ngtcp2_conn *conn, uint8_t *key,
   ngtcp2_crypto_ctx cctx;
   uint32_t version;
 
-  if (level == NGTCP2_CRYPTO_LEVEL_EARLY && !ngtcp2_conn_is_server(conn)) {
+  if (level == NGTCP2_ENCRYPTION_LEVEL_0RTT && !ngtcp2_conn_is_server(conn)) {
     return 0;
   }
 
@@ -235,13 +244,16 @@ int ngtcp2_crypto_derive_and_install_rx_key(ngtcp2_conn *conn, uint8_t *key,
   }
 
   switch (level) {
-  case NGTCP2_CRYPTO_LEVEL_EARLY:
-    ngtcp2_crypto_ctx_tls_early(&cctx, tls);
-    ngtcp2_conn_set_early_crypto_ctx(conn, &cctx);
-    ctx = ngtcp2_conn_get_early_crypto_ctx(conn);
+  case NGTCP2_ENCRYPTION_LEVEL_0RTT:
+    if (ngtcp2_crypto_ctx_tls_early(&cctx, tls) == NULL) {
+      return -1;
+    }
+
+    ngtcp2_conn_set_0rtt_crypto_ctx(conn, &cctx);
+    ctx = ngtcp2_conn_get_0rtt_crypto_ctx(conn);
     version = ngtcp2_conn_get_client_chosen_version(conn);
     break;
-  case NGTCP2_CRYPTO_LEVEL_HANDSHAKE:
+  case NGTCP2_ENCRYPTION_LEVEL_HANDSHAKE:
     if (ngtcp2_conn_is_server(conn) &&
         !ngtcp2_conn_get_negotiated_version(conn)) {
       rv = ngtcp2_crypto_set_remote_transport_params(conn, tls);
@@ -250,15 +262,21 @@ int ngtcp2_crypto_derive_and_install_rx_key(ngtcp2_conn *conn, uint8_t *key,
       }
     }
     /* fall through */
-  default:
+  case NGTCP2_ENCRYPTION_LEVEL_1RTT:
     ctx = ngtcp2_conn_get_crypto_ctx(conn);
     version = ngtcp2_conn_get_negotiated_version(conn);
 
     if (!ctx->aead.native_handle) {
-      ngtcp2_crypto_ctx_tls(&cctx, tls);
+      if (ngtcp2_crypto_ctx_tls(&cctx, tls) == NULL) {
+        return -1;
+      }
+
       ngtcp2_conn_set_crypto_ctx(conn, &cctx);
       ctx = ngtcp2_conn_get_crypto_ctx(conn);
     }
+    break;
+  default:
+    return -1;
   }
 
   aead = &ctx->aead;
@@ -280,20 +298,20 @@ int ngtcp2_crypto_derive_and_install_rx_key(ngtcp2_conn *conn, uint8_t *key,
   }
 
   switch (level) {
-  case NGTCP2_CRYPTO_LEVEL_EARLY:
-    rv = ngtcp2_conn_install_early_key(conn, &aead_ctx, iv, ivlen, &hp_ctx);
+  case NGTCP2_ENCRYPTION_LEVEL_0RTT:
+    rv = ngtcp2_conn_install_0rtt_key(conn, &aead_ctx, iv, ivlen, &hp_ctx);
     if (rv != 0) {
       goto fail;
     }
     break;
-  case NGTCP2_CRYPTO_LEVEL_HANDSHAKE:
+  case NGTCP2_ENCRYPTION_LEVEL_HANDSHAKE:
     rv = ngtcp2_conn_install_rx_handshake_key(conn, &aead_ctx, iv, ivlen,
                                               &hp_ctx);
     if (rv != 0) {
       goto fail;
     }
     break;
-  case NGTCP2_CRYPTO_LEVEL_APPLICATION:
+  case NGTCP2_ENCRYPTION_LEVEL_1RTT:
     if (!ngtcp2_conn_is_server(conn)) {
       rv = ngtcp2_crypto_set_remote_transport_params(conn, tls);
       if (rv != 0) {
@@ -345,7 +363,7 @@ static int crypto_set_local_transport_params(ngtcp2_conn *conn, void *tls) {
 
 int ngtcp2_crypto_derive_and_install_tx_key(ngtcp2_conn *conn, uint8_t *key,
                                             uint8_t *iv, uint8_t *hp_key,
-                                            ngtcp2_crypto_level level,
+                                            ngtcp2_encryption_level level,
                                             const uint8_t *secret,
                                             size_t secretlen) {
   const ngtcp2_crypto_ctx *ctx;
@@ -361,7 +379,7 @@ int ngtcp2_crypto_derive_and_install_tx_key(ngtcp2_conn *conn, uint8_t *key,
   ngtcp2_crypto_ctx cctx;
   uint32_t version;
 
-  if (level == NGTCP2_CRYPTO_LEVEL_EARLY && ngtcp2_conn_is_server(conn)) {
+  if (level == NGTCP2_ENCRYPTION_LEVEL_0RTT && ngtcp2_conn_is_server(conn)) {
     return 0;
   }
 
@@ -376,13 +394,16 @@ int ngtcp2_crypto_derive_and_install_tx_key(ngtcp2_conn *conn, uint8_t *key,
   }
 
   switch (level) {
-  case NGTCP2_CRYPTO_LEVEL_EARLY:
-    ngtcp2_crypto_ctx_tls_early(&cctx, tls);
-    ngtcp2_conn_set_early_crypto_ctx(conn, &cctx);
-    ctx = ngtcp2_conn_get_early_crypto_ctx(conn);
+  case NGTCP2_ENCRYPTION_LEVEL_0RTT:
+    if (ngtcp2_crypto_ctx_tls_early(&cctx, tls) == NULL) {
+      return -1;
+    }
+
+    ngtcp2_conn_set_0rtt_crypto_ctx(conn, &cctx);
+    ctx = ngtcp2_conn_get_0rtt_crypto_ctx(conn);
     version = ngtcp2_conn_get_client_chosen_version(conn);
     break;
-  case NGTCP2_CRYPTO_LEVEL_HANDSHAKE:
+  case NGTCP2_ENCRYPTION_LEVEL_HANDSHAKE:
     if (ngtcp2_conn_is_server(conn) &&
         !ngtcp2_conn_get_negotiated_version(conn)) {
       rv = ngtcp2_crypto_set_remote_transport_params(conn, tls);
@@ -391,15 +412,21 @@ int ngtcp2_crypto_derive_and_install_tx_key(ngtcp2_conn *conn, uint8_t *key,
       }
     }
     /* fall through */
-  default:
+  case NGTCP2_ENCRYPTION_LEVEL_1RTT:
     ctx = ngtcp2_conn_get_crypto_ctx(conn);
     version = ngtcp2_conn_get_negotiated_version(conn);
 
     if (!ctx->aead.native_handle) {
-      ngtcp2_crypto_ctx_tls(&cctx, tls);
+      if (ngtcp2_crypto_ctx_tls(&cctx, tls) == NULL) {
+        return -1;
+      }
+
       ngtcp2_conn_set_crypto_ctx(conn, &cctx);
       ctx = ngtcp2_conn_get_crypto_ctx(conn);
     }
+    break;
+  default:
+    return -1;
   }
 
   aead = &ctx->aead;
@@ -421,13 +448,13 @@ int ngtcp2_crypto_derive_and_install_tx_key(ngtcp2_conn *conn, uint8_t *key,
   }
 
   switch (level) {
-  case NGTCP2_CRYPTO_LEVEL_EARLY:
-    rv = ngtcp2_conn_install_early_key(conn, &aead_ctx, iv, ivlen, &hp_ctx);
+  case NGTCP2_ENCRYPTION_LEVEL_0RTT:
+    rv = ngtcp2_conn_install_0rtt_key(conn, &aead_ctx, iv, ivlen, &hp_ctx);
     if (rv != 0) {
       goto fail;
     }
     break;
-  case NGTCP2_CRYPTO_LEVEL_HANDSHAKE:
+  case NGTCP2_ENCRYPTION_LEVEL_HANDSHAKE:
     rv = ngtcp2_conn_install_tx_handshake_key(conn, &aead_ctx, iv, ivlen,
                                               &hp_ctx);
     if (rv != 0) {
@@ -440,7 +467,7 @@ int ngtcp2_crypto_derive_and_install_tx_key(ngtcp2_conn *conn, uint8_t *key,
     }
 
     break;
-  case NGTCP2_CRYPTO_LEVEL_APPLICATION:
+  case NGTCP2_ENCRYPTION_LEVEL_1RTT:
     rv = ngtcp2_conn_install_tx_key(conn, secret, secretlen, &aead_ctx, iv,
                                     ivlen, &hp_ctx);
     if (rv != 0) {
@@ -521,7 +548,7 @@ int ngtcp2_crypto_derive_and_install_initial_key(
   ngtcp2_conn_set_initial_crypto_ctx(conn, &ctx);
 
   if (ngtcp2_crypto_derive_initial_secrets(
-          version, rx_secret, tx_secret, initial_secret, client_dcid,
+          rx_secret, tx_secret, initial_secret, version, client_dcid,
           server ? NGTCP2_CRYPTO_SIDE_SERVER : NGTCP2_CRYPTO_SIDE_CLIENT) !=
       0) {
     return -1;
@@ -564,6 +591,7 @@ int ngtcp2_crypto_derive_and_install_initial_key(
 
     switch (version) {
     case NGTCP2_PROTO_VER_V1:
+    default:
       retry_key = (const uint8_t *)NGTCP2_RETRY_KEY_V1;
       retry_noncelen = sizeof(NGTCP2_RETRY_NONCE_V1) - 1;
       break;
@@ -571,9 +599,6 @@ int ngtcp2_crypto_derive_and_install_initial_key(
       retry_key = (const uint8_t *)NGTCP2_RETRY_KEY_V2;
       retry_noncelen = sizeof(NGTCP2_RETRY_NONCE_V2) - 1;
       break;
-    default:
-      retry_key = (const uint8_t *)NGTCP2_RETRY_KEY_DRAFT;
-      retry_noncelen = sizeof(NGTCP2_RETRY_NONCE_DRAFT) - 1;
     }
 
     if (ngtcp2_crypto_aead_ctx_encrypt_init(&retry_aead_ctx, &retry_aead,
@@ -657,7 +682,7 @@ int ngtcp2_crypto_derive_and_install_vneg_initial_key(
   }
 
   if (ngtcp2_crypto_derive_initial_secrets(
-          version, rx_secret, tx_secret, initial_secret, client_dcid,
+          rx_secret, tx_secret, initial_secret, version, client_dcid,
           server ? NGTCP2_CRYPTO_SIDE_SERVER : NGTCP2_CRYPTO_SIDE_CLIENT) !=
       0) {
     return -1;
@@ -725,8 +750,8 @@ int ngtcp2_crypto_update_key(
   size_t ivlen = ngtcp2_crypto_packet_protection_ivlen(aead);
   uint32_t version = ngtcp2_conn_get_negotiated_version(conn);
 
-  if (ngtcp2_crypto_update_traffic_secret(rx_secret, md, current_rx_secret,
-                                          secretlen) != 0) {
+  if (ngtcp2_crypto_update_traffic_secret(rx_secret, version, md,
+                                          current_rx_secret, secretlen) != 0) {
     return -1;
   }
 
@@ -735,8 +760,8 @@ int ngtcp2_crypto_update_key(
     return -1;
   }
 
-  if (ngtcp2_crypto_update_traffic_secret(tx_secret, md, current_tx_secret,
-                                          secretlen) != 0) {
+  if (ngtcp2_crypto_update_traffic_secret(tx_secret, version, md,
+                                          current_tx_secret, secretlen) != 0) {
     return -1;
   }
 
@@ -907,12 +932,14 @@ ngtcp2_ssize ngtcp2_crypto_generate_retry_token(
   ngtcp2_crypto_md md;
   ngtcp2_crypto_aead_ctx aead_ctx;
   size_t plaintextlen;
-  uint8_t aad[sizeof(version) + sizeof(ngtcp2_sockaddr_storage) +
-              NGTCP2_MAX_CIDLEN];
+  uint8_t
+      aad[sizeof(version) + sizeof(ngtcp2_sockaddr_union) + NGTCP2_MAX_CIDLEN];
   size_t aadlen;
   uint8_t *p = plaintext;
   ngtcp2_tstamp ts_be = ngtcp2_htonl64(ts);
   int rv;
+
+  assert((size_t)remote_addrlen <= sizeof(ngtcp2_sockaddr_union));
 
   memset(plaintext, 0, sizeof(plaintext));
 
@@ -984,8 +1011,8 @@ int ngtcp2_crypto_verify_retry_token(
   ngtcp2_crypto_aead_ctx aead_ctx;
   ngtcp2_crypto_aead aead;
   ngtcp2_crypto_md md;
-  uint8_t aad[sizeof(version) + sizeof(ngtcp2_sockaddr_storage) +
-              NGTCP2_MAX_CIDLEN];
+  uint8_t
+      aad[sizeof(version) + sizeof(ngtcp2_sockaddr_union) + NGTCP2_MAX_CIDLEN];
   size_t aadlen;
   const uint8_t *rand_data;
   const uint8_t *ciphertext;
@@ -993,6 +1020,8 @@ int ngtcp2_crypto_verify_retry_token(
   size_t cil;
   int rv;
   ngtcp2_tstamp gen_ts;
+
+  assert((size_t)remote_addrlen <= sizeof(ngtcp2_sockaddr_union));
 
   if (tokenlen != NGTCP2_CRYPTO_MAX_RETRY_TOKENLEN ||
       token[0] != NGTCP2_CRYPTO_TOKEN_MAGIC_RETRY) {
@@ -1234,8 +1263,8 @@ ngtcp2_ssize ngtcp2_crypto_write_connection_close(
 
   ngtcp2_crypto_ctx_initial(&ctx);
 
-  if (ngtcp2_crypto_derive_initial_secrets(version, rx_secret, tx_secret,
-                                           initial_secret, scid,
+  if (ngtcp2_crypto_derive_initial_secrets(rx_secret, tx_secret, initial_secret,
+                                           version, scid,
                                            NGTCP2_CRYPTO_SIDE_SERVER) != 0) {
     return -1;
   }
@@ -1287,6 +1316,7 @@ ngtcp2_ssize ngtcp2_crypto_write_retry(uint8_t *dest, size_t destlen,
 
   switch (version) {
   case NGTCP2_PROTO_VER_V1:
+  default:
     key = (const uint8_t *)NGTCP2_RETRY_KEY_V1;
     noncelen = sizeof(NGTCP2_RETRY_NONCE_V1) - 1;
     break;
@@ -1294,9 +1324,6 @@ ngtcp2_ssize ngtcp2_crypto_write_retry(uint8_t *dest, size_t destlen,
     key = (const uint8_t *)NGTCP2_RETRY_KEY_V2;
     noncelen = sizeof(NGTCP2_RETRY_NONCE_V2) - 1;
     break;
-  default:
-    key = (const uint8_t *)NGTCP2_RETRY_KEY_DRAFT;
-    noncelen = sizeof(NGTCP2_RETRY_NONCE_DRAFT) - 1;
   }
 
   if (ngtcp2_crypto_aead_ctx_encrypt_init(&aead_ctx, &aead, key, noncelen) !=
@@ -1331,8 +1358,8 @@ int ngtcp2_crypto_client_initial_cb(ngtcp2_conn *conn, void *user_data) {
     return NGTCP2_ERR_CALLBACK_FAILURE;
   }
 
-  if (ngtcp2_crypto_read_write_crypto_data(conn, NGTCP2_CRYPTO_LEVEL_INITIAL,
-                                           NULL, 0) != 0) {
+  if (ngtcp2_crypto_read_write_crypto_data(
+          conn, NGTCP2_ENCRYPTION_LEVEL_INITIAL, NULL, 0) != 0) {
     return NGTCP2_ERR_CALLBACK_FAILURE;
   }
 
@@ -1398,15 +1425,15 @@ void ngtcp2_crypto_delete_crypto_cipher_ctx_cb(
 }
 
 int ngtcp2_crypto_recv_crypto_data_cb(ngtcp2_conn *conn,
-                                      ngtcp2_crypto_level crypto_level,
+                                      ngtcp2_encryption_level encryption_level,
                                       uint64_t offset, const uint8_t *data,
                                       size_t datalen, void *user_data) {
   int rv;
   (void)offset;
   (void)user_data;
 
-  if (ngtcp2_crypto_read_write_crypto_data(conn, crypto_level, data, datalen) !=
-      0) {
+  if (ngtcp2_crypto_read_write_crypto_data(conn, encryption_level, data,
+                                           datalen) != 0) {
     rv = ngtcp2_conn_get_tls_error(conn);
     if (rv) {
       return rv;

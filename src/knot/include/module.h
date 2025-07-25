@@ -1,4 +1,4 @@
-/*  Copyright (C) 2022 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2023 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -36,7 +36,7 @@
 /*** Query module API. ***/
 
 /*! Current module ABI version. */
-#define KNOTD_MOD_ABI_VERSION	400
+#define KNOTD_MOD_ABI_VERSION	500
 /*! Module configuration name prefix. */
 #define KNOTD_MOD_NAME_PREFIX	"mod-"
 
@@ -405,10 +405,13 @@ typedef struct {
 	knotd_query_proto_t proto;             /*!< Transport protocol used. */
 	knotd_query_flag_t flags;              /*!< Current query flags. */
 	const struct sockaddr_storage *remote; /*!< Current remote address. */
+	const struct sockaddr_storage *local;  /*!< Current local address. */
 	int socket;                            /*!< Current network socket. */
 	unsigned thread_id;                    /*!< Current thread id. */
 	void *server;                          /*!< Server object private item. */
 	const struct knot_xdp_msg *xdp_msg;    /*!< Possible XDP message context. */
+	struct knot_quic_conn *quic_conn;      /*!< QUIC connection context. */
+	int64_t quic_stream;                   /*!< QUIC stream ID inside quic_conn. */
 	uint32_t measured_rtt;                 /*!< Measured RTT in usecs: QUIC or TCP-XDP. */
 } knotd_qdata_params_t;
 
@@ -436,12 +439,13 @@ typedef struct {
  * Gets the local (destination) address of the query.
  *
  * \param[in] qdata  Query data.
- * \param[out] buff  Auxiliary buffer (not used for XDP).
  *
  * \return Local address or NULL if error.
  */
-const struct sockaddr_storage *knotd_qdata_local_addr(knotd_qdata_t *qdata,
-                                                      struct sockaddr_storage *buff);
+inline static const struct sockaddr_storage *knotd_qdata_local_addr(knotd_qdata_t *qdata)
+{
+	return qdata->params->local;
+}
 
 /*!
  * Gets the remote (source) address of the query.
@@ -450,7 +454,10 @@ const struct sockaddr_storage *knotd_qdata_local_addr(knotd_qdata_t *qdata,
  *
  * \return Remote address or NULL if error.
  */
-const struct sockaddr_storage *knotd_qdata_remote_addr(knotd_qdata_t *qdata);
+inline static const struct sockaddr_storage *knotd_qdata_remote_addr(knotd_qdata_t *qdata)
+{
+	return qdata->params->remote;
+}
 
 /*!
  * Gets the measured TCP round-trip-time.

@@ -1,4 +1,4 @@
-/*  Copyright (C) 2022 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2023 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -28,6 +28,7 @@ typedef enum {
 	LOG_OPERATION_UPDATE,
 	LOG_OPERATION_DS_CHECK,
 	LOG_OPERATION_DS_PUSH,
+	LOG_OPERATION_DNSKEY_SYNC,
 } log_operation_t;
 
 typedef enum {
@@ -53,6 +54,8 @@ static inline const char *log_operation_name(log_operation_t operation)
 		return "DS check";
 	case LOG_OPERATION_DS_PUSH:
 		return "DS push";
+	case LOG_OPERATION_DNSKEY_SYNC:
+		return "DNSKEY sync";
 	default:
 		return "?";
 	}
@@ -71,6 +74,18 @@ static inline const char *log_direction_name(log_direction_t direction)
 	}
 }
 
+static inline const char *log_conn_info(knotd_query_proto_t proto, bool pool)
+{
+	switch (proto) {
+	case KNOTD_QUERY_PROTO_TCP:
+		return pool ? " TCP/pool" : " TCP";
+	case KNOTD_QUERY_PROTO_QUIC:
+		return pool ? " QUIC/0-RTT" : " QUIC";
+	default:
+		return "";
+	}
+}
+
 /*!
  * \brief Generate log message for server communication.
  *
@@ -78,11 +93,11 @@ static inline const char *log_direction_name(log_direction_t direction)
  *
  * [example.com] NOTIFY, outgoing, remote 2001:db8::1@53, serial 123
  */
-#define ns_log(priority, zone, op, dir, remote, pool, fmt, ...) \
+#define ns_log(priority, zone, op, dir, remote, proto, pool, fmt, ...) \
 	do { \
 		char address[SOCKADDR_STRLEN] = ""; \
 		sockaddr_tostr(address, sizeof(address), (const struct sockaddr_storage *)remote); \
 		log_fmt_zone(priority, LOG_SOURCE_ZONE, zone, NULL, "%s%s, remote %s%s, " fmt, \
 		             log_operation_name(op), log_direction_name(dir), address, \
-		             (pool) ? " pool" : "", ## __VA_ARGS__); \
+		             log_conn_info(proto, pool), ## __VA_ARGS__); \
 	} while (0)

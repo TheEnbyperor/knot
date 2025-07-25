@@ -164,8 +164,6 @@ void ngtcp2_pkt_hd_init(ngtcp2_pkt_hd *hd, uint8_t flags, uint8_t type,
   hd->len = len;
 }
 
-static int has_mask(uint8_t b, uint8_t mask) { return (b & mask) == mask; }
-
 ngtcp2_ssize ngtcp2_pkt_decode_hd_long(ngtcp2_pkt_hd *dest, const uint8_t *pkt,
                                        size_t pktlen) {
   uint8_t type;
@@ -542,7 +540,7 @@ ngtcp2_ssize ngtcp2_pkt_decode_frame(ngtcp2_frame *dest, const uint8_t *payload,
     return ngtcp2_pkt_decode_datagram_frame(&dest->datagram, payload,
                                             payloadlen);
   default:
-    if (has_mask(type, NGTCP2_FRAME_STREAM)) {
+    if ((type & ~(NGTCP2_FRAME_STREAM - 1)) == NGTCP2_FRAME_STREAM) {
       return ngtcp2_pkt_decode_stream_frame(&dest->stream, payload, payloadlen);
     }
     return NGTCP2_ERR_FRAME_ENCODING;
@@ -2150,7 +2148,7 @@ int64_t ngtcp2_pkt_adjust_pkt_num(int64_t max_pkt_num, int64_t pkt_num,
   return cand;
 }
 
-int ngtcp2_pkt_validate_ack(ngtcp2_ack *fr) {
+int ngtcp2_pkt_validate_ack(ngtcp2_ack *fr, int64_t min_pkt_num) {
   int64_t largest_ack = fr->largest_ack;
   size_t i;
 
@@ -2159,6 +2157,10 @@ int ngtcp2_pkt_validate_ack(ngtcp2_ack *fr) {
   }
 
   largest_ack -= (int64_t)fr->first_ack_range;
+
+  if (largest_ack < min_pkt_num) {
+    return NGTCP2_ERR_PROTO;
+  }
 
   for (i = 0; i < fr->rangecnt; ++i) {
     if (largest_ack < (int64_t)fr->ranges[i].gap + 2) {
@@ -2172,6 +2174,10 @@ int ngtcp2_pkt_validate_ack(ngtcp2_ack *fr) {
     }
 
     largest_ack -= (int64_t)fr->ranges[i].len;
+
+    if (largest_ack < min_pkt_num) {
+      return NGTCP2_ERR_PROTO;
+    }
   }
 
   return 0;
@@ -2241,6 +2247,7 @@ ngtcp2_ssize ngtcp2_pkt_write_retry(
 
   switch (version) {
   case NGTCP2_PROTO_VER_V1:
+  default:
     nonce = (const uint8_t *)NGTCP2_RETRY_NONCE_V1;
     noncelen = sizeof(NGTCP2_RETRY_NONCE_V1) - 1;
     break;
@@ -2248,9 +2255,6 @@ ngtcp2_ssize ngtcp2_pkt_write_retry(
     nonce = (const uint8_t *)NGTCP2_RETRY_NONCE_V2;
     noncelen = sizeof(NGTCP2_RETRY_NONCE_V2) - 1;
     break;
-  default:
-    nonce = (const uint8_t *)NGTCP2_RETRY_NONCE_DRAFT;
-    noncelen = sizeof(NGTCP2_RETRY_NONCE_DRAFT) - 1;
   }
 
   /* OpenSSL does not like NULL plaintext. */
@@ -2333,6 +2337,7 @@ int ngtcp2_pkt_verify_retry_tag(uint32_t version, const ngtcp2_pkt_retry *retry,
 
   switch (version) {
   case NGTCP2_PROTO_VER_V1:
+  default:
     nonce = (const uint8_t *)NGTCP2_RETRY_NONCE_V1;
     noncelen = sizeof(NGTCP2_RETRY_NONCE_V1) - 1;
     break;
@@ -2340,9 +2345,6 @@ int ngtcp2_pkt_verify_retry_tag(uint32_t version, const ngtcp2_pkt_retry *retry,
     nonce = (const uint8_t *)NGTCP2_RETRY_NONCE_V2;
     noncelen = sizeof(NGTCP2_RETRY_NONCE_V2) - 1;
     break;
-  default:
-    nonce = (const uint8_t *)NGTCP2_RETRY_NONCE_DRAFT;
-    noncelen = sizeof(NGTCP2_RETRY_NONCE_DRAFT) - 1;
   }
 
   /* OpenSSL does not like NULL plaintext. */
@@ -2433,8 +2435,7 @@ int ngtcp2_is_supported_version(uint32_t version) {
   case NGTCP2_PROTO_VER_V2:
     return 1;
   default:
-    return NGTCP2_PROTO_VER_DRAFT_MIN <= version &&
-           version <= NGTCP2_PROTO_VER_DRAFT_MAX;
+    return 0;
   }
 }
 
@@ -2465,8 +2466,6 @@ uint8_t ngtcp2_pkt_get_type_long(uint32_t version, uint8_t c) {
       return 0;
     }
 
-    /* QUIC v1 and draft versions share the same numeric packet
-       types. */
     switch (pkt_type) {
     case NGTCP2_PKT_TYPE_INITIAL_V1:
       return NGTCP2_PKT_INITIAL;
@@ -2502,8 +2501,6 @@ uint8_t ngtcp2_pkt_versioned_type(uint32_t version, uint32_t pkt_type) {
        types with QUIC v1 in order to send a packet to elicit Version
        Negotiation packet. */
 
-    /* QUIC v1 and draft versions share the same numeric packet
-       types. */
     switch (pkt_type) {
     case NGTCP2_PKT_INITIAL:
       return NGTCP2_PKT_TYPE_INITIAL_V1;

@@ -33,7 +33,7 @@ static int systemd_zone_load_timeout(void)
 {
 	const char *timeout = getenv("KNOT_ZONE_LOAD_TIMEOUT_SEC");
 
-	int out;
+	int out = ZONE_LOAD_TIMEOUT_DEFAULT;
 	if (timeout != NULL && timeout[0] != '\0' &&
 	    str_to_int(timeout, &out, 0, 24 * 3600) == KNOT_EOK) {
 		return out;
@@ -143,6 +143,17 @@ void systemd_emit_zone_updated(const knot_dname_t *zone_name, uint32_t serial)
 	char *zone_str = knot_dname_to_str(buff, zone_name, sizeof(buff));
 	if (zone_str != NULL) {
 		emit_event(KNOT_BUS_EVENT_ZONE_UPD, "su", zone_str, serial);
+	}
+#endif
+}
+
+void systemd_emit_keys_updated(const knot_dname_t *zone_name)
+{
+#ifdef ENABLE_DBUS
+	knot_dname_txt_storage_t buff;
+	char *zone_str = knot_dname_to_str(buff, zone_name, sizeof(buff));
+	if (zone_str != NULL) {
+		emit_event(KNOT_BUS_EVENT_ZONE_KEYS_UPD, "s", zone_str);
 	}
 #endif
 }

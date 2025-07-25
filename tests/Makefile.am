@@ -166,7 +166,6 @@ endif ENABLE_XDP
 
 if HAVE_LIBUTILS
 check_PROGRAMS += \
-	utils/test_cert				\
 	utils/test_lookup
 endif HAVE_LIBUTILS
 
@@ -202,15 +201,6 @@ utils_test_lookup_CPPFLAGS = \
 	$(libedit_CFLAGS)
 
 utils_test_lookup_LDADD = \
-	$(top_builddir)/src/libknotus.la	\
-	$(libedit_LIBS)				\
-	$(LDADD)
-
-utils_test_cert_CPPFLAGS = \
-	$(AM_CPPFLAGS)				\
-	$(libedit_CFLAGS)
-
-utils_test_cert_LDADD = \
 	$(top_builddir)/src/libknotus.la	\
 	$(libedit_LIBS)				\
 	$(LDADD)

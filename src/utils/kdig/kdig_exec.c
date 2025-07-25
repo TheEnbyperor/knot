@@ -31,9 +31,10 @@
 #include "contrib/ucw/lists.h"
 
 #if USE_DNSTAP
-# include "contrib/dnstap/convert.h"
-# include "contrib/dnstap/message.h"
-# include "contrib/dnstap/writer.h"
+#include "contrib/dnstap/convert.h"
+#include "contrib/dnstap/message.h"
+#include "contrib/dnstap/writer.h"
+#include "libknot/probe/data.h"
 
 static int write_dnstap(dt_writer_t           *writer,
                         const bool            is_query,
@@ -109,19 +110,7 @@ static void fill_remote_addr(net_t *net, Dnstap__Message *message, bool is_initi
 
 	struct sockaddr_storage ss = { 0 };
 	int family = dt_family_decode(message->socket_family);
-	int proto = dt_protocol_decode(message->socket_protocol);
-	int sock_type = 0;
-
-	switch (proto) {
-	case IPPROTO_TCP:
-		sock_type = SOCK_STREAM;
-		break;
-	case IPPROTO_UDP:
-		sock_type = SOCK_DGRAM;
-		break;
-	default:
-		break;
-	}
+	knot_probe_proto_t proto = dt_protocol_decode(message->socket_protocol);
 
 	ProtobufCBinaryData *addr = NULL;
 	uint32_t port = 0;
@@ -136,7 +125,7 @@ static void fill_remote_addr(net_t *net, Dnstap__Message *message, bool is_initi
 	sockaddr_set_raw(&ss, family, addr->data, addr->len);
 	sockaddr_port_set(&ss, port);
 
-	get_addr_str(&ss, sock_type, &net->remote_str);
+	get_addr_str(&ss, proto, &net->remote_str);
 }
 
 static int process_dnstap(const query_t *query)
@@ -753,7 +742,8 @@ static int process_query_packet(const knot_pkt_t      *query,
 
 	// Print reply packet.
 	if (style->format != FORMAT_JSON) {
-		print_packet(reply, net, in_len, time_diff_ms(&t_query, &t_end),
+		// Intentionaly start-end because of QUIC can have receive time.
+		print_packet(reply, net, in_len, time_diff_ms(&t_start, &t_end),
 		             timestamp, true, style);
 	} else {
 		knot_pkt_t *q = knot_pkt_new(query->wire, query->size, NULL);
@@ -816,7 +806,8 @@ static int process_query_packet(const knot_pkt_t      *query,
 
 fail:
 	if (style->format != FORMAT_JSON) {
-		print_packet(reply, net, in_len, time_diff_ms(&t_query, &t_end),
+		// Intentionaly start-end because of QUIC can have receive time.
+		print_packet(reply, net, in_len, time_diff_ms(&t_start, &t_end),
 		             timestamp, true, style);
 	} else {
 		knot_pkt_t *q = knot_pkt_new(query->wire, query->size, NULL);

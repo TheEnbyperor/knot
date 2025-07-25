@@ -1,4 +1,4 @@
-/*  Copyright (C) 2022 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2023 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -57,12 +57,14 @@ typedef enum {
  * \param tsig       TSIG parameters.
  * \param zone_name  Zone name.
  * \param query      Update query.
+ * \param conn       Possible QUIC connection.
  *
  * \retval True if authenticated.
  */
 bool acl_allowed(conf_t *conf, conf_val_t *acl, acl_action_t action,
                  const struct sockaddr_storage *addr, knot_tsig_key_t *tsig,
-                 const knot_dname_t *zone_name, knot_pkt_t *query);
+                 const knot_dname_t *zone_name, knot_pkt_t *query,
+                 struct knot_quic_conn *conn);
 
 /*!
  * \brief Checks if the address and/or tsig key matches a remote from the list.
@@ -76,8 +78,9 @@ bool acl_allowed(conf_t *conf, conf_val_t *acl, acl_action_t action,
  * \param rmts       Pointer to REMOTE config multivalued identifier.
  * \param addr       IP address.
  * \param tsig       TSIG parameters.
+ * \param conn       Possible QUIC connection.
  *
  * \retval True if authenticated.
  */
 bool rmt_allowed(conf_t *conf, conf_val_t *rmts, const struct sockaddr_storage *addr,
-                 knot_tsig_key_t *tsig);
+                 knot_tsig_key_t *tsig, struct knot_quic_conn *conn);

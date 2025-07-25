@@ -21,6 +21,7 @@ import dnstest.config
 import dnstest.inquirer
 import dnstest.params as params
 import dnstest.keys
+from dnstest.libknot import libknot
 import dnstest.module
 import dnstest.response
 import dnstest.update
@@ -67,6 +68,7 @@ class ZoneDnssec(object):
         self.ksk_sbm_timeout = None
         self.ksk_sbm_delay = None
         self.ds_push = None
+        self.dnskey_sync = None
         self.ksk_shared = None
         self.shared_policy_with = None
         self.cds_publish = None
@@ -91,10 +93,12 @@ class Zone(object):
         self.zfile = zone_file
         self.masters = set()
         self.slaves = set()
+        self.serial_modulo = None
         self.ddns = ddns
         self.ixfr = ixfr
         self.journal_content = journal_content # journal contents
         self.modules = []
+        self.reverse_from = None
         self.dnssec = ZoneDnssec()
         self.catalog_role = ZoneCatalogRole.NONE
         self.catalog_gen_name = None # Generated catalog name for this member
@@ -156,6 +160,8 @@ class Server(object):
         self.addr = None
         self.addr_extra = list()
         self.port = 53 # Needed for keymgr when port not yet generated
+        self.quic_port = None
+        self.cert_key = str()
         self.udp_workers = None
         self.bg_workers = None
         self.fixed_port = False
@@ -166,6 +172,7 @@ class Server(object):
         self.tsig = None
         self.tsig_test = None
         self.no_xfr_edns = None
+        self.via = None
 
         self.zones = dict()
 
@@ -173,10 +180,12 @@ class Server(object):
         self.tcp_remote_io_timeout = None
         self.tcp_io_timeout = None
         self.tcp_idle_timeout = None
+        self.quic_idle_close_timeout = None
         self.udp_max_payload = None
         self.udp_max_payload_ipv4 = None
         self.udp_max_payload_ipv6 = None
         self.disable_notify = None
+        self.ddns_master = None
         self.semantic_check = True
         self.zonefile_sync = "1d"
         self.zonefile_load = None
@@ -185,7 +194,6 @@ class Server(object):
         self.ixfr_by_one = None
         self.journal_db_size = 20 * 1024 * 1024
         self.journal_max_usage = 5 * 1024 * 1024
-        self.journal_max_depth = 100
         self.timer_db_size = 1 * 1024 * 1024
         self.kasp_db_size = 10 * 1024 * 1024
         self.catalog_db_size = 10 * 1024 * 1024
@@ -193,6 +201,8 @@ class Server(object):
         self.serial_policy = None
         self.auto_acl = None
         self.provide_ixfr = None
+        self.master_pin_tol = None
+        self.quic_log = None
 
         self.inquirer = None
 
@@ -210,14 +220,19 @@ class Server(object):
         self.binding_errors = 0
 
     def _check_socket(self, proto, port):
-        if ipaddress.ip_address(self.addr).version == 4:
-            iface = "4%s@%s:%i" % (proto, self.addr, port)
+        if self.addr.startswith("/"):
+            param = ""
+            iface = self.addr
         else:
-            iface = "6%s@[%s]:%i" % (proto, self.addr, port)
+            param = "-i"
+            if ipaddress.ip_address(self.addr).version == 4:
+                iface = "4%s@%s:%i" % (proto, self.addr, port)
+            else:
+                iface = "6%s@[%s]:%i" % (proto, self.addr, port)
 
         for i in range(5):
             pids = []
-            proc = Popen(["lsof", "-i", iface],
+            proc = Popen(["lsof", param, iface],
                          stdout=PIPE, stderr=PIPE, universal_newlines=True)
             (out, err) = proc.communicate()
             for line in out.split("\n"):
@@ -453,6 +468,10 @@ class Server(object):
         detail_log(SEP)
         f.close()
 
+    def _assert_check(self):
+        if os.path.isfile(self.ferr) and fsearch(self.ferr, "Assertion"):
+            set_err("ASSERT")
+
     def backtrace(self):
         if self.valgrind:
             check_log("BACKTRACE %s" % self.name)
@@ -487,6 +506,7 @@ class Server(object):
                 detail_log(SEP)
                 self.kill()
         if check:
+            self._assert_check()
             self._valgrind_check()
 
     def kill(self):
@@ -510,6 +530,17 @@ class Server(object):
         f = open(self.confile, mode="w")
         f.write(self.get_config())
         f.close()
+
+    def fill_cert_key(self):
+        try:
+            out = check_output([self.control_bin] + self.ctl_params + ["status", "cert-key"],
+                               stderr=open(self.dir + "/call.err", mode="a"))
+            key = out.rstrip().decode('ascii')
+            if key != "-":
+                self.cert_key = key
+        except CalledProcessError as e:
+            raise Failed("Can't get certificate key, server='%s', ret='%i'" %
+                         (self.name, e.returncode))
 
     def dig(self, rname, rtype, rclass="IN", udp=None, serial=None, timeout=None,
             tries=3, flags="", bufsize=None, edns=None, nsid=False, dnssec=False,
@@ -700,29 +731,13 @@ class Server(object):
                          (len(data), self.name))
 
     def log_search(self, pattern):
-        with open(self.fout) as log:
-            for line in log:
-                if pattern in line:
-                    return True
-        with open(self.ferr) as log:
-            for line in log:
-                if pattern in line:
-                    return True
-        return False
+        return fsearch(self.fout, pattern) or fsearch(self.ferr, pattern)
 
     def log_search_count(self, pattern):
-        count = 0
-        with open(self.fout) as log:
-            for line in log:
-                if pattern in line:
-                    count += 1
-        with open(self.ferr) as log:
-            for line in log:
-                if pattern in line:
-                    count += 1
-        return count
+        return fsearch_count(self.fout, pattern) + fsearch_count(self.ferr, pattern)
 
-    def zone_wait(self, zone, serial=None, equal=False, greater=True, udp=True, tsig=None):
+    def zone_wait(self, zone, serial=None, equal=False, greater=True, udp=True,
+                  tsig=None, use_ctl=False):
         '''Try to get SOA record. With an optional serial number and given
            relation (equal or/and greater).'''
 
@@ -730,30 +745,38 @@ class Server(object):
 
         _serial = 0
 
+        if use_ctl:
+            ctl = libknot.control.KnotCtl()
+            zone_name = zone.name.lower()
+
         check_log("ZONE WAIT %s: %s" % (self.name, zone.name))
 
         attempts = 60 if not self.valgrind else 100
         for t in range(attempts):
             try:
-                resp = self.dig(zone.name, "SOA", udp=udp, tries=1,
-                                timeout=2, log_no_sep=True, tsig=tsig)
+                if use_ctl:
+                    ctl.connect(os.path.join(self.dir, "knot.sock"))
+                    ctl.send_block(cmd="zone-read", zone=zone_name,
+                                   owner="@", rtype="SOA")
+                    resp = ctl.receive_block()
+                    ctl.send(libknot.control.KnotCtlType.END)
+                    ctl.close()
+                    soa_rdata = resp[zone_name][zone_name]["SOA"]["data"][0]
+                    _serial = int(soa_rdata.split()[2])
+                else:
+                    resp = self.dig(zone.name, "SOA", udp=udp, tries=1,
+                                    timeout=2, log_no_sep=True, tsig=tsig)
+                    soa = str((resp.resp.answer[0]).to_rdataset())
+                    _serial = int(soa.split()[5])
             except:
                 pass
             else:
-                if resp.resp.rcode() == 0:
-                    if not resp.resp.answer:
-                        raise Failed("No SOA in ANSWER, zone='%s', server='%s'" %
-                                     (zone.name, self.name))
-
-                    soa = str((resp.resp.answer[0]).to_rdataset())
-                    _serial = int(soa.split()[5])
-
-                    if not serial:
-                        break
-                    elif equal and serial == _serial:
-                        break
-                    elif greater and serial < _serial:
-                        break
+                if not serial:
+                    break
+                elif equal and serial == _serial:
+                    break
+                elif greater and serial < _serial:
+                    break
             time.sleep(2)
         else:
             self.backtrace()
@@ -768,7 +791,8 @@ class Server(object):
 
         return _serial
 
-    def zones_wait(self, zone_list, serials=None, serials_zfile=False, equal=False, greater=True):
+    def zones_wait(self, zone_list, serials=None, serials_zfile=False, equal=False,
+                   greater=True, use_ctl=False):
         new_serials = dict()
 
         if serials_zfile:
@@ -781,7 +805,7 @@ class Server(object):
         for zone in zone_list:
             old_serial = serials[zone.name] if serials else None
             new_serial = self.zone_wait(zone, serial=old_serial, equal=equal,
-                                        greater=greater)
+                                        greater=greater, use_ctl=use_ctl)
             new_serials[zone.name] = new_serial
 
         return new_serials
@@ -1260,6 +1284,8 @@ class Knot(Server):
                 acl += ", acl_%s" % slave.name
             if slaves:
                 conf.item("notify", "[%s]" % slaves)
+        for remote in zone.dnssec.dnskey_sync if zone.dnssec.dnskey_sync else []:
+            acl += ", acl_%s_ddns" % remote.name
         if not self.auto_acl:
             conf.item("acl", "[%s]" % acl)
 
@@ -1275,7 +1301,12 @@ class Knot(Server):
         self._on_str_hex(s, "nsid", self.nsid)
         s.item_str("rundir", self.dir)
         s.item_str("pidfile", os.path.join(self.dir, self.pidfile))
-        s.item_str("listen", "%s@%s" % (self.addr, self.port))
+        if self.addr.startswith("/"):
+            s.item_str("listen", "%s" % self.addr)
+        else:
+            s.item_str("listen", "%s@%s" % (self.addr, self.port))
+        if self.quic_port:
+            s.item_str("listen-quic", "%s@%s" % (self.addr, self.quic_port))
         if self.udp_workers:
             s.item_str("udp-workers", self.udp_workers)
         if self.bg_workers:
@@ -1283,10 +1314,11 @@ class Knot(Server):
 
         for addr in self.addr_extra:
             s.item_str("listen", "%s@%s" % (addr, self.port))
+        self._bool(s, "tcp-reuseport", self.tcp_reuseport)
         self._str(s, "tcp-remote-io-timeout", self.tcp_remote_io_timeout)
         self._str(s, "tcp-io-timeout", self.tcp_io_timeout)
         self._str(s, "tcp-idle-timeout", self.tcp_idle_timeout)
-        self._bool(s, "tcp-reuseport", self.tcp_reuseport)
+        self._str(s, "quic-idle-close-timeout", self.quic_idle_close_timeout)
         self._str(s, "udp-max-payload", self.udp_max_payload)
         self._str(s, "udp-max-payload-ipv4", self.udp_max_payload_ipv4)
         self._str(s, "udp-max-payload-ipv6", self.udp_max_payload_ipv6)
@@ -1294,6 +1326,11 @@ class Knot(Server):
         self._str(s, "remote-retry-delay", str(random.choice([0, 1, 5])))
         self._bool(s, "automatic-acl", self.auto_acl)
         s.end()
+
+        if self.quic_log:
+            s.begin("xdp")
+            s.item_str("quic-log", "on")
+            s.end()
 
         s.begin("control")
         s.item_str("listen", "knot.sock")
@@ -1312,6 +1349,8 @@ class Knot(Server):
                     self._key(s, keys, master.tsig, master.name)
                 for slave in z.slaves:
                     self._key(s, keys, slave.tsig, slave.name)
+                for remote in z.dnssec.dnskey_sync if z.dnssec.dnskey_sync else []:
+                    self._key(s, keys, remote.tsig, remote.name)
             s.end()
 
         have_remote = False
@@ -1324,9 +1363,20 @@ class Knot(Server):
                         s.begin("remote")
                         have_remote = True
                     s.id_item("id", master.name)
-                    s.item_str("address", "%s@%s" % (master.addr, master.port))
+                    if master.quic_port:
+                        s.item_str("address", "%s@%s" % (master.addr, master.quic_port))
+                        s.item_str("quic", "on")
+                        if master.cert_key:
+                            s.item_str("cert-key", master.cert_key)
+                    else:
+                        if master.addr.startswith("/"):
+                            s.item_str("address", "%s" % master.addr)
+                        else:
+                            s.item_str("address", "%s@%s" % (master.addr, master.port))
                     if self.tsig:
                         s.item_str("key", self.tsig.name)
+                    if self.via:
+                        s.item_str("via", self.via)
                     if master.no_xfr_edns:
                         s.item_str("no-edns", "on")
                     servers.add(master.name)
@@ -1336,7 +1386,18 @@ class Knot(Server):
                         s.begin("remote")
                         have_remote = True
                     s.id_item("id", slave.name)
-                    s.item_str("address", "%s@%s" % (slave.addr, slave.port))
+                    if slave.quic_port:
+                        s.item_str("address", "%s@%s" % (slave.addr, slave.quic_port))
+                        s.item_str("quic", "on")
+                        if slave.cert_key:
+                            s.item_str("cert-key", slave.cert_key)
+                    else:
+                        if slave.addr.startswith("/"):
+                            s.item_str("address", "%s" % slave.addr)
+                        else:
+                            s.item_str("address", "%s@%s" % (slave.addr, slave.port))
+                    if self.via:
+                        s.item_str("via", self.via)
                     if self.tsig:
                         s.item_str("key", self.tsig.name)
                     servers.add(slave.name)
@@ -1346,8 +1407,28 @@ class Knot(Server):
                         s.begin("remote")
                         have_remote = True
                     s.id_item("id", parent.name)
-                    s.item_str("address", "%s@%s" % (parent.addr, parent.port))
+                    if parent.addr.startswith("/"):
+                        s.item_str("address", "%s" % parent.addr)
+                    else:
+                        s.item_str("address", "%s@%s" % (parent.addr, parent.port))
+                    if self.via:
+                        s.item_str("via", self.via)
                     servers.add(parent.name)
+            for remote in z.dnssec.dnskey_sync if z.dnssec.dnskey_sync else []:
+                if remote.name not in servers:
+                    if not have_remote:
+                        s.begin("remote")
+                        have_remote = True
+                    s.id_item("id", remote.name)
+                    if remote.addr.startswith("/"):
+                        s.item_str("address", "%s" % remote.addr)
+                    else:
+                        s.item_str("address", "%s@%s" % (remote.addr, remote.port))
+                    if remote.via:
+                        s.item_str("via", self.via)
+                    if remote.tsig:
+                        s.item_str("key", self.tsig.name)
+                    servers.add(remote.name)
 
         if have_remote:
             s.end()
@@ -1365,20 +1446,39 @@ class Knot(Server):
             for master in z.masters:
                 if master.name not in servers:
                     s.id_item("id", "acl_%s" % master.name)
-                    s.item_str("address", master.addr)
+                    if master.addr.startswith("/"):
+                        s.item_str("address", self.addr)
+                    else:
+                        s.item_str("address", master.addr)
                     if master.tsig:
                         s.item_str("key", master.tsig.name)
+                    if master.cert_key:
+                        s.item_str("cert-key", master.cert_key)
                     s.item("action", "notify")
                     servers.add(master.name)
             for slave in z.slaves:
                 if slave.name in servers:
                     continue
                 s.id_item("id", "acl_%s" % slave.name)
-                s.item_str("address", slave.addr)
+                if slave.addr.startswith("/"):
+                    s.item_str("address", self.addr)
+                else:
+                    s.item_str("address", slave.addr)
                 if slave.tsig:
                     s.item_str("key", slave.tsig.name)
-                s.item("action", "transfer")
+                if slave.cert_key:
+                    s.item_str("cert-key", slave.cert_key)
+                s.item("action", "[transfer, update]")
                 servers.add(slave.name)
+            for remote in z.dnssec.dnskey_sync if z.dnssec.dnskey_sync else []:
+                dupl_name = remote.name + "_ddns"
+                if dupl_name in servers:
+                    continue
+                s.id_item("id", "acl_%s" % dupl_name)
+                if remote.tsig:
+                    s.item_str("key", remote.tsig.name)
+                s.item("action", "update")
+                servers.add(dupl_name)
         s.end()
 
         if len(self.modules) > 0:
@@ -1415,6 +1515,27 @@ class Knot(Server):
             if z.dnssec.ksk_sbm_delay is not None:
                 self._str(s, "parent-delay", z.dnssec.ksk_sbm_delay)
         if have_sbm:
+            s.end()
+
+        have_dnskeysync = False
+        for zone in sorted(self.zones):
+            z = self.zones[zone]
+            if not z.dnssec.enable:
+                continue
+            if z.dnssec.dnskey_sync is None:
+                continue
+            if not have_dnskeysync:
+                s.begin("dnskey-sync")
+                have_dnskeysync = True
+            s.id_item("id", z.name)
+            remotes = ""
+            for remote in z.dnssec.dnskey_sync:
+                if remotes:
+                    remotes += ", "
+                remotes += remote.name
+            if remotes != "":
+                s.item("remote", "[%s]" % remotes)
+        if have_dnskeysync:
             s.end()
 
         have_policy = False
@@ -1454,6 +1575,8 @@ class Knot(Server):
                 s.item("ksk-submission", z.name)
             if z.dnssec.ds_push:
                 self._str(s, "ds-push", z.dnssec.ds_push.name)
+            if z.dnssec.dnskey_sync:
+                s.item("dnskey-sync", z.name)
             self._bool(s, "ksk-shared", z.dnssec.ksk_shared)
             self._str(s, "cds-cdnskey-publish", z.dnssec.cds_publish)
             if z.dnssec.cds_digesttype:
@@ -1484,7 +1607,6 @@ class Knot(Server):
         if self.zonemd_generate is not None:
             s.item_str("zonemd-generate", self.zonemd_generate)
         s.item_str("journal-max-usage", self.journal_max_usage)
-        s.item_str("journal-max-depth", self.journal_max_depth)
         s.item_str("adjust-threads", str(random.randint(1,4)))
         if self.semantic_check == "soft":
             self._str(s, "semantic-checks", self.semantic_check)
@@ -1547,9 +1669,14 @@ class Knot(Server):
             self.config_xfr(z, s)
 
             self._str(s, "serial-policy", self.serial_policy)
+            self._str(s, "serial-modulo", z.serial_modulo)
+            self._str(s, "ddns-master", self.ddns_master)
 
             s.item_str("journal-content", z.journal_content)
             self._str(s, "ixfr-by-one", self.ixfr_by_one)
+
+            if z.reverse_from:
+                s.item_str("reverse-generate", z.reverse_from.name)
 
             self._str(s, "refresh-min-interval", z.refresh_min)
             self._str(s, "refresh-max-interval", z.refresh_max)
@@ -1564,6 +1691,7 @@ class Knot(Server):
                 s.item_str("zonefile-load", "difference")
 
             self._bool(s, "provide-ixfr", self.provide_ixfr)
+            self._str(s, "master-pin-tolerance", self.master_pin_tol)
 
             if z.catalog_role == ZoneCatalogRole.GENERATE:
                 s.item_str("catalog-role", "generate")

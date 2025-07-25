@@ -23,7 +23,6 @@
 #include "knot/ctl/commands.h"
 #include "knot/conf/conf.h"
 #include "knot/conf/confdb.h"
-#include "knot/conf/module.h"
 #include "knot/conf/tools.h"
 #include "knot/zone/zonefile.h"
 #include "knot/zone/zone-load.h"
@@ -607,11 +606,6 @@ static int zone_check(const knot_dname_t *dname, void *data)
 {
 	cmd_args_t *args = data;
 
-	conf_val_t load = conf_zone_get(conf(), C_ZONEFILE_LOAD, dname);
-	if (conf_opt(&load) == ZONEFILE_LOAD_NONE) {
-		return KNOT_EOK;
-	}
-
 	zone_contents_t *contents = NULL;
 	conf_val_t mode = conf_zone_get(conf(), C_SEM_CHECKS, dname);
 	int ret = zone_load_contents(conf(), dname, &contents, conf_opt(&mode), args->force);
@@ -687,19 +681,18 @@ static int cmd_zone_ctl(cmd_args_t *args)
 	return ctl_receive(args);
 }
 
-#define MAX_FILTERS 12
-
 typedef struct {
 	const char *name;
 	char id;
 	bool with_data; // Only ONE filter of each filter_desc_t may have data!
 } filter_desc_t;
 
-const filter_desc_t zone_flush_filters[MAX_FILTERS] = {
+const filter_desc_t zone_flush_filters[] = {
 	{ "+outdir", CTL_FILTER_FLUSH_OUTDIR, true },
+	{ NULL },
 };
 
-const filter_desc_t zone_backup_filters[MAX_FILTERS] = {
+const filter_desc_t zone_backup_filters[] = {
 	{ "+backupdir",   CTL_FILTER_BACKUP_OUTDIR,      true },
 	{ "+zonefile",    CTL_FILTER_BACKUP_ZONEFILE,   false },
 	{ "+nozonefile",  CTL_FILTER_BACKUP_NOZONEFILE, false },
@@ -711,18 +704,22 @@ const filter_desc_t zone_backup_filters[MAX_FILTERS] = {
 	{ "+nokaspdb",    CTL_FILTER_BACKUP_NOKASPDB,   false },
 	{ "+catalog",     CTL_FILTER_BACKUP_CATALOG,    false },
 	{ "+nocatalog",   CTL_FILTER_BACKUP_NOCATALOG,  false },
+	{ "+quic",        CTL_FILTER_BACKUP_QUIC,       false },
+	{ "+noquic",      CTL_FILTER_BACKUP_NOQUIC,     false },
+	{ NULL },
 };
 
-const filter_desc_t zone_status_filters[MAX_FILTERS] = {
+const filter_desc_t zone_status_filters[] = {
 	{ "+role",        CTL_FILTER_STATUS_ROLE },
 	{ "+serial",      CTL_FILTER_STATUS_SERIAL },
 	{ "+transaction", CTL_FILTER_STATUS_TRANSACTION },
 	{ "+freeze",      CTL_FILTER_STATUS_FREEZE },
 	{ "+catalog",     CTL_FILTER_STATUS_CATALOG },
 	{ "+events",      CTL_FILTER_STATUS_EVENTS },
+	{ NULL },
 };
 
-const filter_desc_t zone_purge_filters[MAX_FILTERS] = {
+const filter_desc_t zone_purge_filters[] = {
 	{ "+expire",   CTL_FILTER_PURGE_EXPIRE },
 	{ "+zonefile", CTL_FILTER_PURGE_ZONEFILE },
 	{ "+journal",  CTL_FILTER_PURGE_JOURNAL },
@@ -730,9 +727,12 @@ const filter_desc_t zone_purge_filters[MAX_FILTERS] = {
 	{ "+kaspdb",   CTL_FILTER_PURGE_KASPDB },
 	{ "+catalog",  CTL_FILTER_PURGE_CATALOG },
 	{ "+orphan",   CTL_FILTER_PURGE_ORPHAN },
+	{ NULL },
 };
 
-const filter_desc_t null_filter = { 0 };
+const filter_desc_t null_filter = { NULL };
+
+#define MAX_FILTERS sizeof(zone_backup_filters) / sizeof(filter_desc_t) - 1
 
 static const filter_desc_t *get_filter(ctl_cmd_t cmd, const char *filter_name)
 {
@@ -754,7 +754,7 @@ static const filter_desc_t *get_filter(ctl_cmd_t cmd, const char *filter_name)
 	default:
 		return &null_filter;
 	}
-	for (size_t i = 0; i < MAX_FILTERS && fd[i].name != NULL; i++) {
+	for (size_t i = 0; fd[i].name != NULL; i++) {
 		if (strcmp(fd[i].name, filter_name) == 0) {
 			return &fd[i];
 		}
@@ -1126,17 +1126,13 @@ static int cmd_conf_import(cmd_args_t *args)
 			return KNOT_EDENIED;
 		}
 
+		log_debug("importing confdb from file '%s'", args->argv[0]);
+
 		// Import to a cloned conf to avoid external module conflict.
 		conf_t *new_conf = NULL;
 		ret = conf_clone(&new_conf);
 		if (ret == KNOT_EOK) {
-			yp_schema_purge_dynamic(new_conf->schema);
-			log_debug("loading modules for imported configuration");
-			ret = conf_mod_load_common(new_conf);
-			if (ret == KNOT_EOK) {
-				log_debug("importing confdb from file '%s'", args->argv[0]);
-				ret = conf_import(new_conf, args->argv[0], true, false);
-			}
+			ret = conf_import(new_conf, args->argv[0], true, false);
 			conf_free(new_conf);
 		}
 	}
