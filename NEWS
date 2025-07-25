@@ -1,3 +1,33 @@
+Knot DNS 3.4.4 (2025-01-22)
+===========================
+
+Features:
+---------
+ - knotd: added support for EDNS ZONEVERSION
+ - kdig: added support for EDNS ZONEVERSION (see '+zoneversion')
+
+Improvements:
+-------------
+ - knotd: improved control error detection and reporting
+ - kdig: proper section names for exported DDNS messages
+ - libs: upgraded embedded libngtcp2 to 1.10.0
+ - python: expanded documentation for the libknot control API
+ - doc: updated XDP prerequisites
+
+Bugfixes:
+---------
+ - knotd: a DNAME record at the zone apex with active NSEC3 not accepted via XFR
+ - knotd: configuration abort times out if no active transaction
+ - knotd: defective serial modulo result if it overflows
+ - knotd: TLS connections not properly terminated
+ - knotd: maximum zone TTL not correctly recomputed after RRSIG TTL change
+ - knotd: zone hangs if zone reload fails (Thanks to solidcc2)
+ - knotd: statistics dump generates invalid YAML output if XDP is enabled #947
+ - knotd: insufficient check for incomplete control message
+ - mod-dnstap: used incorrect type for DDNS messages
+ - knot-exporter: failed to run with Python 3.11 or older
+ - tests: test_atomic and test_spinlock require building with the daemon enabled #946
+
 Knot DNS 3.4.3 (2024-12-06)
 ===========================
 
@@ -9,7 +39,7 @@ Improvements:
  - knotd: new configuration check for using default NSEC3 salt length, which will change
  - mod-rrl: added QNAME (if possible) and transport protocol to log messages
  - mod-rrl: increased defaults for 'log-period' to 30 secs, 'rate-limit' to 50,
-            'instant-rate-limit' to 125, and 'time-rate-limit' to 5 ms,
+            'instant-rate-limit' to 125, and 'time-rate-limit' to 5 ms
  - kxdpgun: added space separators to some printed values for better readability
  - libs: upgraded embedded libngtcp2 to 1.9.1
  - knot-exporter: zone timers metric is now disabled by default (see '--zone-timers')
@@ -18,8 +48,8 @@ Improvements:
 
 Bugfixes:
 ---------
- - knotd: more active ZSKs causes cumulative ZSK rollovers
- - knotd: zone purge clears active generated catalog memeber metadata
+ - knotd: more active ZSKs cause cumulative ZSK rollovers
+ - knotd: zone purge clears active generated catalog member metadata
  - mod-rrl: authorized requests are rate limited #943
  - kdig: misleading warning about timeout during QUIC connection
  - keymgr: public-only keys are marked as missing in the list output
