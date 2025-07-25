@@ -21,7 +21,7 @@
 #include <sys/socket.h>
 
 #ifdef LIBIDN
-#include LIBIDN_HEADER
+#include <idn2.h>
 #endif
 
 #include "utils/common/params.h"

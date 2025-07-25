@@ -156,10 +156,8 @@ static zone_t *create_zone_new(conf_t *conf, const knot_dname_t *name,
 		zone->catalog_gen = knot_dname_copy(conf_dname(&catz), NULL);
 		if (zone->timers.catalog_member == 0) {
 			zone->timers.catalog_member = time(NULL);
-			ret = zone_timers_write(&zone->server->timerdb, zone->name,
-			                        &zone->timers);
 		}
-		if (ret != KNOT_EOK || zone->catalog_gen == NULL) {
+		if (zone->catalog_gen == NULL) {
 			log_zone_error(zone->name, "failed to initialize catalog member zone (%s)",
 			               knot_strerror(KNOT_ENOMEM));
 			zone_free(&zone);
@@ -512,7 +510,7 @@ static knot_zonedb_t *create_zonedb(conf_t *conf, server_t *server, reload_t mod
 			if (forw == NULL) {
 				knot_dname_txt_storage_t forw_str;
 				(void)knot_dname_to_str(forw_str, forw_name, sizeof(forw_str));
-				log_zone_warning(z->name, "zone to reverse %s doesn't exist",
+				log_zone_warning(z->name, "zone to reverse %s does not exist",
 				                 forw_str);
 			} else {
 				z->reverse_from = forw;
@@ -589,6 +587,12 @@ catalog_only:
 	}
 }
 
+// UBSAN type punning workaround
+static void zone_contents_deep_free_wrap(void *contents)
+{
+	zone_contents_deep_free((zone_contents_t *)contents);
+}
+
 void zonedb_reload(conf_t *conf, server_t *server, reload_t mode)
 {
 	if (conf == NULL || server == NULL) {
@@ -627,7 +631,7 @@ void zonedb_reload(conf_t *conf, server_t *server, reload_t mode)
 	/* Wait for readers to finish reading old zone database. */
 	synchronize_rcu();
 
-	ptrlist_free_custom(&contents_tofree, NULL, (ptrlist_free_cb)zone_contents_deep_free);
+	ptrlist_free_custom(&contents_tofree, NULL, zone_contents_deep_free_wrap);
 
 	/* Remove old zone DB. */
 	remove_old_zonedb(conf, db_old, server, mode);
@@ -648,7 +652,6 @@ int zone_reload_modules(conf_t *conf, server_t *server, const knot_dname_t *zone
 	if (newzone == NULL) {
 		return KNOT_ENOMEM;
 	}
-	knot_sem_wait(&newzone->cow_lock);
 	conf_activate_modules(conf, server, newzone->name, &newzone->query_modules,
 	                      &newzone->query_plan);
 
@@ -660,7 +663,6 @@ int zone_reload_modules(conf_t *conf, server_t *server, const knot_dname_t *zone
 	assert(newzone->contents == oldzone->contents);
 	oldzone->contents = NULL; // contents have been re-used by newzone
 
-	knot_sem_post(&newzone->cow_lock);
 	knot_sem_post(&oldzone->cow_lock);
 	zone_free(&oldzone);
 

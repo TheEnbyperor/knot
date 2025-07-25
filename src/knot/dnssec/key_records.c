@@ -1,4 +1,4 @@
-/*  Copyright (C) 2022 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2023 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -189,7 +189,7 @@ int key_records_dump(char **buf, size_t *buf_size, const key_records_t *r, bool 
 	return ret >= 0 ? KNOT_EOK : ret;
 }
 
-int key_records_sign(const zone_key_t *key, key_records_t *r, const kdnssec_ctx_t *kctx, knot_time_t *expires)
+int key_records_sign(const zone_key_t *key, key_records_t *r, const kdnssec_ctx_t *kctx)
 {
 	dnssec_sign_ctx_t *sign_ctx;
 	int ret = dnssec_sign_new(&sign_ctx, key->key);
@@ -198,20 +198,20 @@ int key_records_sign(const zone_key_t *key, key_records_t *r, const kdnssec_ctx_
 	}
 
 	if (!knot_rrset_empty(&r->dnskey) && knot_zone_sign_use_key(key, &r->dnskey)) {
-		ret = knot_sign_rrset(&r->rrsig, &r->dnskey, key->key, sign_ctx, kctx, NULL, expires);
+		ret = knot_sign_rrset(&r->rrsig, &r->dnskey, key->key, sign_ctx, kctx, NULL);
 	}
 	if (ret == KNOT_EOK && !knot_rrset_empty(&r->cdnskey) && knot_zone_sign_use_key(key, &r->cdnskey)) {
-		ret = knot_sign_rrset(&r->rrsig, &r->cdnskey, key->key, sign_ctx, kctx, NULL, expires);
+		ret = knot_sign_rrset(&r->rrsig, &r->cdnskey, key->key, sign_ctx, kctx, NULL);
 	}
 	if (ret == KNOT_EOK && !knot_rrset_empty(&r->cds) && knot_zone_sign_use_key(key, &r->cds)) {
-		ret = knot_sign_rrset(&r->rrsig, &r->cds, key->key, sign_ctx, kctx, NULL, expires);
+		ret = knot_sign_rrset(&r->rrsig, &r->cds, key->key, sign_ctx, kctx, NULL);
 	}
 
 	dnssec_sign_free(sign_ctx);
 	return ret;
 }
 
-int key_records_verify(key_records_t *r, kdnssec_ctx_t *kctx, knot_time_t timestamp)
+int key_records_verify(key_records_t *r, kdnssec_ctx_t *kctx, knot_time_t timestamp, knot_time_t min_valid)
 {
 	kctx->now = timestamp;
 	int ret = kasp_zone_keys_from_rr(kctx->zone, &r->dnskey.rrs, false, &kctx->keytag_conflict);
@@ -224,12 +224,17 @@ int key_records_verify(key_records_t *r, kdnssec_ctx_t *kctx, knot_time_t timest
 		return KNOT_ENOMEM;
 	}
 
-	ret = knot_validate_rrsigs(&r->dnskey, &r->rrsig, sign_ctx, false);
+	knot_time_t until = 0;
+	ret = knot_validate_rrsigs(&r->dnskey, &r->rrsig, sign_ctx, false, &until);
 	if (ret == KNOT_EOK && !knot_rrset_empty(&r->cdnskey)) {
-		ret = knot_validate_rrsigs(&r->cdnskey, &r->rrsig, sign_ctx, false);
+		ret = knot_validate_rrsigs(&r->cdnskey, &r->rrsig, sign_ctx, false, &until);
 	}
 	if (ret == KNOT_EOK && !knot_rrset_empty(&r->cds)) {
-		ret = knot_validate_rrsigs(&r->cds, &r->rrsig, sign_ctx, false);
+		ret = knot_validate_rrsigs(&r->cds, &r->rrsig, sign_ctx, false, &until);
+	}
+
+	if (ret == KNOT_EOK && knot_time_lt(until, min_valid)) {
+		ret = KNOT_ESOON_EXPIRE;
 	}
 
 	zone_sign_ctx_free(sign_ctx);

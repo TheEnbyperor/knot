@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import enum
 import inspect
 import os
 import time
@@ -7,6 +8,12 @@ import time
 from dnstest.context import Context
 
 SEP = "------------------------------------"
+
+class Proto(enum.Enum):
+    UDP = 0
+    TCP = 1
+    TLS = 2
+    QUIC = 3
 
 class Skip(Exception):
     """Exception for skipping current case."""
@@ -30,9 +37,11 @@ def test_info():
     frames = inspect.getouterframes(inspect.currentframe())
     for frame in frames:
         frame_dir = os.path.normpath(os.path.dirname(frame[1]))
-        if frame_dir in Context().test_dir:
-            info = "%s#%i" % (frame_dir, frame[2])
-            break
+        if Context().test_dir in frame_dir:
+            if len(info) > 0:
+                info += "<-%i" % frame[2]
+            else:
+                info = "%s#%i" % (frame_dir, frame[2])
     parts = info.split("/")
 
     if len(parts) > 1:

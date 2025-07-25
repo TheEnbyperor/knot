@@ -453,15 +453,23 @@ static int pkt_sendrecv(knsupdate_params_t *params)
 		return -1;
 	}
 
+	ret = net_init_crypto(&net, &params->tls_params, NULL, &params->quic_params);
+	if (ret != 0) {
+		ERR("failed to initialize crypto context (%s)", knot_strerror(ret));
+		net_clean(&net);
+		return -1;
+	}
+
 	ret = net_connect(&net);
-	DBG("%s: send_msg = %d", __func__, net.sockfd);
 	if (ret != KNOT_EOK) {
+		ERR("failed to connect (%s)", knot_strerror(ret));
 		net_clean(&net);
 		return -1;
 	}
 
 	ret = net_send(&net, params->query->wire, params->query->size);
 	if (ret != KNOT_EOK) {
+		ERR("failed to send update (%s)", knot_strerror(ret));
 		net_close(&net);
 		net_clean(&net);
 		return -1;
@@ -472,8 +480,8 @@ static int pkt_sendrecv(knsupdate_params_t *params)
 
 	/* Wait for reception. */
 	int rb = net_receive(&net, params->answer->wire, params->answer->max_size);
-	DBG("%s: receive_msg = %d", __func__, rb);
 	if (rb <= 0) {
+		ERR("failed to receive response (%s)", knot_strerror(rb));
 		net_close(&net);
 		net_clean(&net);
 		return -1;

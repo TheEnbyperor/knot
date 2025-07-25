@@ -1,4 +1,4 @@
-/*  Copyright (C) 2023 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2024 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -398,7 +398,7 @@ int tls_certificate_verification(tls_ctx_t *ctx)
 	};
 	size_t data_count = (ctx->params->hostname != NULL) ? 2 : 1;
 	if (data_count == 1) {
-		WARN("TLS, no hostname provided, will not verify certificate owner")
+		WARN("TLS, no hostname provided, will not verify certificate owner");
 	}
 
 	unsigned int status;
@@ -533,7 +533,8 @@ int tls_ctx_setup_remote_endpoint(tls_ctx_t *ctx, const gnutls_datum_t *alpn,
 	}
 
 	if (priority != NULL) {
-		ret = gnutls_priority_set_direct(ctx->session, priority, NULL);
+		ret = gnutls_set_default_priority_append(ctx->session, priority,
+		                                         NULL, 0);
 	} else {
 		ret = gnutls_set_default_priority(ctx->session);
 	}

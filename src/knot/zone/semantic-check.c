@@ -1,4 +1,4 @@
-/*  Copyright (C) 2023 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2024 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -29,6 +29,8 @@
 static const char *error_messages[SEM_ERR_UNKNOWN + 1] = {
 	[SEM_ERR_SOA_NONE] =
 	"missing SOA at the zone apex",
+	[SEM_ERR_SOA_MULTIPLE] =
+	"multiple SOA records",
 
 	[SEM_ERR_CNAME_EXTRA_RECORDS] =
 	"another record exists beside CNAME",
@@ -171,8 +173,7 @@ static int check_delegation(const zone_node_t *node, semchecks_data_t *data)
 		const knot_dname_t *ns_dname = knot_ns_name(ns_rr);
 		const zone_node_t *glue_node = NULL, *glue_encloser = NULL;
 		int ret = zone_contents_find_dname(data->zone, ns_dname, &glue_node,
-		                                   &glue_encloser, NULL,
-		                                   knot_dname_with_null(ns_dname));
+		                                   &glue_encloser, NULL);
 		switch (ret) {
 		case KNOT_EOUTOFZONE:
 			continue; // NS is out of bailiwick
@@ -517,7 +518,7 @@ static sem_error_t err_dnssec2sem(int ret, uint16_t rrtype, char *info, size_t l
 static int verify_dnssec(zone_contents_t *zone, sem_handler_t *handler, time_t time)
 {
 	zone_update_t fake_up = { .new_cont = zone, };
-	int ret = knot_dnssec_validate_zone(&fake_up, NULL, time, false);
+	int ret = knot_dnssec_validate_zone(&fake_up, NULL, time, false, false);
 	if (fake_up.validation_hint.node != NULL) { // validation found an issue
 		char info[64] = "";
 		sem_error_t err = err_dnssec2sem(ret, fake_up.validation_hint.rrtype, info, sizeof(info));

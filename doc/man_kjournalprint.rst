@@ -57,9 +57,6 @@ Options
 **-x**, **--mono**
   Don't generate colorized output.
 
-**-n**, **--no-color**
-  An alias for **-x**. Use of this option is deprecated, it will be removed in the future.
-
 **-X**, **--color**
   Force colorized output.
 
@@ -67,7 +64,8 @@ Options
   Print the program help.
 
 **-V**, **--version**
-  Print the program version.
+  Print the program version. The option **-VV** makes the program
+  print the compile time configuration summary.
 
 Exit values
 -----------

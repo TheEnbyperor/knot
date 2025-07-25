@@ -21,6 +21,7 @@ import dnstest.config
 import dnstest.inquirer
 import dnstest.params as params
 import dnstest.keys
+import dnstest.knsupdate
 from dnstest.libknot import libknot
 import dnstest.module
 import dnstest.response
@@ -161,9 +162,13 @@ class Server(object):
         self.addr = None
         self.addr_extra = list()
         self.port = 53 # Needed for keymgr when port not yet generated
+        self.xdp_port = None # 0 indicates that XDP is enabled but port not yet assigned
+        self.xdp_cover_sock = None # dummy socket bound to XDP port just to avoid further port collisions
         self.quic_port = None
+        self.tls_port = None
         self.cert_key = str()
         self.udp_workers = None
+        self.tcp_workers = None
         self.bg_workers = None
         self.fixed_port = False
         self.ctlport = None
@@ -219,9 +224,12 @@ class Server(object):
         self.fout = None
         self.ferr = None
         self.valgrind_log = None
+        self.session_log = None
         self.confile = None
 
         self.binding_errors = 0
+
+        self.knsupdate = False
 
     def _check_socket(self, proto, port):
         if self.addr.startswith("/"):
@@ -253,6 +261,13 @@ class Server(object):
             time.sleep(2)
 
         return False
+
+    def query_port(self, xdp=None):
+        if self.xdp_port is None or self.xdp_port == 0:
+            xdp = False
+        if xdp is None:
+            xdp = (random.random() < 0.8)
+        return self.xdp_port if xdp else self.port
 
     def set_master(self, zone, slave=None, ddns=False, ixfr=False, journal_content="changes"):
         '''Set the server as a master for the zone'''
@@ -325,6 +340,9 @@ class Server(object):
             if os.path.isfile(self.valgrind_log):
                 copyfile(self.valgrind_log, self.valgrind_log + str(int(time.time())))
 
+            if os.path.isfile(self.session_log):
+                copyfile(self.session_log, self.session_log + str(int(time.time())))
+
             if os.path.isfile(self.fout):
                 copyfile(self.fout, self.fout + str(int(time.time())))
 
@@ -335,7 +353,8 @@ class Server(object):
                 self.proc = Popen(self.valgrind + [self.daemon_bin] + \
                                   self.start_params,
                                   stdout=open(self.fout, mode=mode),
-                                  stderr=open(self.ferr, mode=mode))
+                                  stderr=open(self.ferr, mode=mode),
+                                  env=dict(os.environ, SSLKEYLOGFILE=self.session_log))
 
             if self.valgrind:
                 time.sleep(Server.START_WAIT_VALGRIND)
@@ -560,7 +579,7 @@ class Server(object):
 
     def dig(self, rname, rtype, rclass="IN", udp=None, serial=None, timeout=None,
             tries=3, flags="", bufsize=None, edns=None, nsid=False, dnssec=False,
-            log_no_sep=False, tsig=None, addr=None, source=None):
+            log_no_sep=False, tsig=None, addr=None, source=None, xdp=None):
 
         # Convert one item zone list to zone name.
         if isinstance(rname, list):
@@ -705,18 +724,18 @@ class Server(object):
             try:
                 if rtype.upper() == "AXFR":
                     resp = dns.query.xfr(addr, rname, rtype, rclass,
-                                         port=self.port, lifetime=timeout,
+                                         port=self.query_port(xdp), lifetime=timeout,
                                          use_udp=udp, **key_params)
                 elif rtype.upper() == "IXFR":
                     resp = dns.query.xfr(addr, rname, rtype, rclass,
-                                         port=self.port, lifetime=timeout,
+                                         port=self.query_port(xdp), lifetime=timeout,
                                          use_udp=udp, serial=int(serial),
                                          **key_params)
                 elif udp:
-                    resp = dns.query.udp(query, addr, port=self.port,
+                    resp = dns.query.udp(query, addr, port=self.query_port(xdp),
                                          timeout=timeout, source=source)
                 else:
-                    resp = dns.query.tcp(query, addr, port=self.port,
+                    resp = dns.query.tcp(query, addr, port=self.query_port(xdp),
                                          timeout=timeout, source=source)
 
                 if not log_no_sep:
@@ -851,8 +870,10 @@ class Server(object):
 
         key_params = self.tsig_test.key_params if self.tsig_test else dict()
 
-        return dnstest.update.Update(self, dns.update.Update(zone.name,
-                                                             **key_params))
+        if self.knsupdate:
+            return dnstest.update.Update(self, dnstest.knsupdate.Knsupdate(zone.name, self.tsig_test))
+        else:
+            return dnstest.update.Update(self, dns.update.Update(zone.name, **key_params))
 
     def gen_key(self, zone, **args):
         zone = zone_arg_check(zone)
@@ -1364,8 +1385,12 @@ class Knot(Server):
             s.item_str("listen", "%s@%s" % (self.addr, self.port))
         if self.quic_port:
             s.item_str("listen-quic", "%s@%s" % (self.addr, self.quic_port))
+        if self.tls_port:
+            s.item_str("listen-tls", "%s@%s" % (self.addr, self.tls_port))
         if self.udp_workers:
             s.item_str("udp-workers", self.udp_workers)
+        if self.tcp_workers:
+            s.item_str("tcp-workers", self.tcp_workers)
         if self.bg_workers:
             s.item_str("background-workers", self.bg_workers)
 
@@ -1384,9 +1409,13 @@ class Knot(Server):
         self._bool(s, "automatic-acl", self.auto_acl)
         s.end()
 
-        if self.quic_log:
+        if self.xdp_port is not None and self.xdp_port > 0:
             s.begin("xdp")
-            s.item_str("quic-log", "on")
+            s.item_str("listen", "%s@%s" % (self.addr, self.xdp_port))
+            s.item_str("tcp", "on")
+            if self.quic_port:
+                s.item_str("quic", "on")
+                s.item_str("quic-port", self.quic_port)
             s.end()
 
         s.begin("control")
@@ -1420,16 +1449,16 @@ class Knot(Server):
                         s.begin("remote")
                         have_remote = True
                     s.id_item("id", master.name)
-                    if master.quic_port:
-                        s.item_str("address", "%s@%s" % (master.addr, master.quic_port))
-                        s.item_str("quic", "on")
+                    if master.quic_port or master.tls_port:
+                        s.item_str("address", "%s@%s" % (master.addr, master.tls_port or master.quic_port))
+                        s.item_str("tls" if master.tls_port else "quic", "on")
                         if master.cert_key:
                             s.item_str("cert-key", master.cert_key)
                     else:
                         if master.addr.startswith("/"):
                             s.item_str("address", "%s" % master.addr)
                         else:
-                            s.item_str("address", "%s@%s" % (master.addr, master.port))
+                            s.item_str("address", "%s@%s" % (master.addr, master.query_port()))
                     if self.tsig:
                         s.item_str("key", self.tsig.name)
                     if self.via:
@@ -1443,16 +1472,16 @@ class Knot(Server):
                         s.begin("remote")
                         have_remote = True
                     s.id_item("id", slave.name)
-                    if slave.quic_port:
-                        s.item_str("address", "%s@%s" % (slave.addr, slave.quic_port))
-                        s.item_str("quic", "on")
+                    if slave.quic_port or slave.tls_port:
+                        s.item_str("address", "%s@%s" % (slave.addr, slave.tls_port or slave.quic_port))
+                        s.item_str("tls" if slave.tls_port else "quic", "on")
                         if slave.cert_key:
                             s.item_str("cert-key", slave.cert_key)
                     else:
                         if slave.addr.startswith("/"):
                             s.item_str("address", "%s" % slave.addr)
                         else:
-                            s.item_str("address", "%s@%s" % (slave.addr, slave.port))
+                            s.item_str("address", "%s@%s" % (slave.addr, slave.query_port()))
                     if self.via:
                         s.item_str("via", self.via)
                     if self.tsig:
@@ -1477,10 +1506,16 @@ class Knot(Server):
                         s.begin("remote")
                         have_remote = True
                     s.id_item("id", remote.name)
-                    if remote.addr.startswith("/"):
-                        s.item_str("address", "%s" % remote.addr)
+                    if remote.quic_port or remote.tls_port:
+                        s.item_str("address", "%s@%s" % (remote.addr, remote.tls_port or remote.quic_port))
+                        s.item_str("tls" if remote.tls_port else "quic", "on")
+                        if remote.cert_key:
+                            s.item_str("cert-key", remote.cert_key)
                     else:
-                        s.item_str("address", "%s@%s" % (remote.addr, remote.port))
+                        if remote.addr.startswith("/"):
+                            s.item_str("address", "%s" % remote.addr)
+                        else:
+                            s.item_str("address", "%s@%s" % (remote.addr, remote.port))
                     if remote.via:
                         s.item_str("via", self.via)
                     if remote.tsig:
@@ -1598,7 +1633,7 @@ class Knot(Server):
         have_policy = False
         for zone in sorted(self.zones):
             z = self.zones[zone]
-            if not z.dnssec.enable:
+            if not z.dnssec.enable and not z.dnssec.validate:
                 continue
 
             if (z.dnssec.shared_policy_with or z.name) != z.name:
@@ -1764,6 +1799,8 @@ class Knot(Server):
 
             if z.dnssec.enable:
                 s.item_str("dnssec-signing", "off" if z.dnssec.disable else "on")
+
+            if z.dnssec.enable or z.dnssec.validate:
                 s.item_str("dnssec-policy", z.dnssec.shared_policy_with or z.name)
 
             self._bool(s, "dnssec-validation", z.dnssec.validate)
@@ -1785,6 +1822,8 @@ class Knot(Server):
         s.begin("log")
         s.id_item("target", "stdout")
         s.item_str("any", "debug")
+        s.id_item("target", self.quic_log)
+        s.item_str("quic", "debug")
         s.end()
 
         self.start_params = ["-c", self.confile]
@@ -1793,6 +1832,13 @@ class Knot(Server):
             self.ctl_params += self.ctl_params_append
 
         return s.conf
+
+    def check_quic(self):
+        res = run([self.daemon_bin, '-VV'], stdout=PIPE)
+        for line in res.stdout.decode('ascii').split("\n"):
+            if "DoQ support" in line and "no" not in line:
+                return
+        raise Skip("QUIC support not available")
 
 class Dummy(Server):
     ''' Dummy name server. '''

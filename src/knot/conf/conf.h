@@ -1,4 +1,4 @@
-/*  Copyright (C) 2023 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2024 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -44,6 +44,8 @@ typedef struct {
 	struct sockaddr_storage via;
 	/*! QUIC context. */
 	bool quic;
+	/*! TLS context. */
+	bool tls;
 	/*! TSIG key. */
 	knot_tsig_key_t key;
 	/*! Suppress sending NOTIFY after zone transfer from this master. */
@@ -469,13 +471,20 @@ void conf_mix_iter_next(
 /*!
  * Gets the numeric value of the item.
  *
- * \param[in] val  Item value.
+ * \param[in] val          Item value.
+ * \param[in] alternative  Use alternative default value.
  *
  * \return Integer.
  */
-int64_t conf_int(
-	conf_val_t *val
+int64_t conf_int_alt(
+	conf_val_t *val,
+	bool alternative
 );
+inline static int64_t conf_int(
+	conf_val_t *val)
+{
+	return conf_int_alt(val, false);
+}
 
 /*!
  * Gets the boolean value of the item.

@@ -117,12 +117,15 @@ class ModRRL(KnotModule):
 
     mod_name = "rrl"
 
-    def __init__(self, rate_limit, slip=None, table_size=None, whitelist=None):
+    def __init__(self, rate_limit, slip=None, table_size=None, whitelist=None,
+                 instant_limit=None, log_period=0):
         super().__init__()
         self.rate_limit = rate_limit
+        self.instant_limit = instant_limit if instant_limit else rate_limit
         self.slip = slip
         self.table_size = table_size
         self.whitelist = whitelist
+        self.log_period = log_period
 
     def get_conf(self, conf=None):
         if not conf:
@@ -131,12 +134,15 @@ class ModRRL(KnotModule):
         conf.begin(self.conf_name)
         conf.id_item("id", self.conf_id)
         conf.item_str("rate-limit", self.rate_limit)
+        conf.item_str("instant-limit", self.instant_limit)
         if self.slip or self.slip == 0:
             conf.item_str("slip", self.slip)
         if self.table_size:
             conf.item_str("table-size", self.table_size)
         if self.whitelist:
             conf.item_str("whitelist", self.whitelist)
+        if self.log_period > 0:
+            conf.item_str("log-period", self.log_period)
         conf.end()
 
         return conf

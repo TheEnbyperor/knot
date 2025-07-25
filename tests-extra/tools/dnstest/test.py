@@ -5,6 +5,8 @@ import os
 import random
 import shutil
 import socket
+import errno
+import psutil
 import time
 import dns.name
 import dns.zone
@@ -20,7 +22,7 @@ class Test(object):
     '''Specification of DNS test topology'''
 
     MAX_START_TRIES = 10
-
+    XDP_LOCK_FILE = "/tmp/knottest-xdp-lock"
     LOCAL_ADDR_COMMON = {4: "127.0.0.1", 6: "::1"}
     LOCAL_ADDR_MULTI = LOCAL_ADDR_COMMON
     if params.addresses > 1:
@@ -36,7 +38,8 @@ class Test(object):
     rel_time = time.time()
     start_time = 0
 
-    def __init__(self, address=None, tsig=None, stress=True, quic=False):
+    def __init__(self, address=None, tsig=None, stress=True, quic=False, tls=False, \
+                 knsupdate=False):
         if not os.path.exists(Context().out_dir):
             raise Exception("Output directory doesn't exist")
 
@@ -44,6 +47,8 @@ class Test(object):
         self.data_dir = Context().test_dir + "/data/"
         self.zones_dir = self.out_dir + "/zones/"
         self.quic = quic
+        self.tls = tls
+        self.knsupdate = knsupdate
 
         if address == 4 or address == 6:
             self.addr = Test.LOCAL_ADDR_COMMON[address]
@@ -103,6 +108,28 @@ class Test(object):
         Test.last_port = port
         return port
 
+    def _gen_lock_file(self, srvname):
+        try:
+            fd = os.open(self.XDP_LOCK_FILE, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            with os.fdopen(fd, "w") as f:
+                f.write(str(os.getpid()) + "\n" + self.out_dir + "\n" + srvname + "\n")
+            return True
+        except OSError as e:
+            if e.errno == errno.EEXIST:
+                return False
+
+    def _clean_lock_file(self):
+        try:
+            with open(self.XDP_LOCK_FILE, "r") as f:
+                lines = f.read().splitlines()
+                if lines[0] != str(os.getpid()) or lines[1] != self.out_dir:
+                    if psutil.pid_exists(int(lines[0])):
+                        return
+            os.unlink(self.XDP_LOCK_FILE)
+        except OSError as e:
+            if e.errno != errno.ENOENT:
+                raise e
+
     @property
     def hostname(self):
         hostname = socket.gethostname()
@@ -112,7 +139,7 @@ class Test(object):
 
     def server(self, server, nsid=None, ident=None, version=None, \
                valgrind=None, address=None, port=None, ctlport=None, \
-               external=False, tsig=None, via=None):
+               xdp_enable=True, external=False, tsig=None, via=None):
         if server == "knot":
             srv = dnstest.server.Knot()
         elif server == "bind":
@@ -164,7 +191,17 @@ class Test(object):
         srv.fout = srv.dir + "/stdout"
         srv.ferr = srv.dir + "/stderr"
         srv.valgrind_log = srv.dir + "/valgrind"
+        srv.session_log = srv.dir + "/secrets.log"
+        srv.quic_log = srv.dir + "/quic.log"
         srv.confile = srv.dir + "/%s.conf" % srv.name
+
+        xdp_enable = (params.xdp and xdp_enable and \
+                      server == "knot" and \
+                      srv.addr.startswith("::") and \
+                      random.choice([False, True]) and \
+                      self._gen_lock_file(srv.name))
+        if xdp_enable:
+            srv.xdp_port = 0
 
         prepare_dir(srv.dir)
 
@@ -176,10 +213,13 @@ class Test(object):
            (valgrind or (valgrind == None and server == "knot")):
             srv.valgrind = [params.valgrind_bin] + \
                            params.valgrind_flags.split() + \
-                           ["--log-file=%s" % srv.valgrind_log]
+                           ["--log-file=%s" % srv.valgrind_log] + \
+                           (["--undef-value-errors=no"] if xdp_enable else [])
             suppressions_file = "%s/%s.supp" % (params.common_data_dir, server)
             if os.path.isfile(suppressions_file):
                 srv.valgrind.append("--suppressions=%s" % suppressions_file)
+
+        srv.knsupdate = self.knsupdate
 
         self.servers.add(srv)
         return srv
@@ -205,7 +245,15 @@ class Test(object):
 
             server.port = self._gen_port()
             server.ctlport = self._gen_port()
-            server.quic_port = self._gen_port() if self.quic else None
+            if self.tls:
+                server.tls_port = self._gen_port()
+                server.quic_port = server.tls_port if self.quic else None
+            else:
+                server.quic_port = self._gen_port() if self.quic else None
+            server.xdp_port = self._gen_port() if server.xdp_port is not None else None
+            if server.xdp_port:
+                server.xdp_cover_sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+                server.xdp_cover_sock.bind((server.addr, server.xdp_port))
 
         for server in self.servers:
             server.gen_confile()
@@ -259,10 +307,14 @@ class Test(object):
         '''Finish testing'''
 
         self.stop(check=True)
+        self._clean_lock_file()
         Context().test = None
 
     def sleep(self, seconds):
         time.sleep(seconds)
+
+    def pause(self, msg=None):
+        input(test_info() + ((", " + msg) if msg else ""))
 
     def rel_sleep(self, seconds):
         timenow = time.time()

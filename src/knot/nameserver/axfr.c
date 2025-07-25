@@ -121,14 +121,14 @@ static void axfr_answer_finished(knotd_qdata_t *qdata, knot_pkt_t *pkt, int stat
 		xfr_stats_add(&xfr->stats, pkt->size);
 		xfr_stats_end(&xfr->stats);
 		xfr_log_finished(ZONE_NAME(qdata), LOG_OPERATION_AXFR, LOG_DIRECTION_OUT,
-				 REMOTE(qdata), PROTO(qdata), KEY(qdata), &xfr->stats);
+				 REMOTE(qdata), PROTO(qdata), KEY(qdata), "", &xfr->stats);
 		break;
 	default:
 		break;
 	}
 }
 
-static int axfr_query_check(knotd_qdata_t *qdata)
+static knot_layer_state_t axfr_query_check(knotd_qdata_t *qdata)
 {
 	NS_NEED_ZONE(qdata, KNOT_RCODE_NOTAUTH);
 	NS_NEED_AUTH(qdata, ACL_ACTION_TRANSFER);
@@ -187,7 +187,7 @@ static int axfr_query_init(knotd_qdata_t *qdata)
 	return KNOT_EOK;
 }
 
-int axfr_process_query(knot_pkt_t *pkt, knotd_qdata_t *qdata)
+knot_layer_state_t axfr_process_query(knot_pkt_t *pkt, knotd_qdata_t *qdata)
 {
 	if (pkt == NULL || qdata == NULL) {
 		return KNOT_STATE_FAIL;

@@ -65,6 +65,18 @@ typedef struct knot_ctl knot_ctl_t;
 knot_ctl_t* knot_ctl_alloc(void);
 
 /*!
+ * \brief Allocates a control context based on an existing one.
+ *
+ * \param[in,out] ctx  Original control context.
+ *
+ * \note The listen_sock is kept at the original, the current sock is taken
+ *       by the clone and RESET in the original!
+ *
+ * \return Control context or NULL.
+ */
+knot_ctl_t* knot_ctl_clone(knot_ctl_t *ctx);
+
+/*!
  * Deallocates a control context.
  *
  * \param[in] ctx  Control context.
@@ -86,12 +98,13 @@ void knot_ctl_set_timeout(knot_ctl_t *ctx, int timeout_ms);
  *
  * \note Server operation.
  *
- * \param[in] ctx   Control context.
- * \param[in] path  Control UNIX socket path.
+ * \param[in] ctx      Control context.
+ * \param[in] path     Control UNIX socket path.
+ * \param[in] backlog  Socket listen backlog size.
  *
  * \return Error code, KNOT_EOK if successful.
  */
-int knot_ctl_bind(knot_ctl_t *ctx, const char *path);
+int knot_ctl_bind(knot_ctl_t *ctx, const char *path, unsigned backlog);
 
 /*!
  * Same as knot_ctl_bind() with socket backlog specification.

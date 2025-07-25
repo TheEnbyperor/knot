@@ -22,6 +22,7 @@
 #include <stdio.h>
 
 #include "libknot/libknot.h"
+#include "contrib/string.h"
 #include "contrib/ucw/lists.h"
 
 #define DEFAULT_IPV4_NAME	"127.0.0.1"
@@ -31,7 +32,7 @@
 #define DEFAULT_DNS_QUIC_PORT	"853"
 #define DEFAULT_DNS_TLS_PORT	"853"
 #define DEFAULT_UDP_SIZE	512
-#define DEFAULT_EDNS_SIZE	4096
+#define DEFAULT_EDNS_SIZE	1232
 #define MAX_PACKET_SIZE		65535
 
 #define SEP_CHARS		"\n\t "
@@ -118,9 +119,15 @@ typedef struct {
 	param_handle_f handler;
 } param_t;
 
-inline static void print_version(const char *program_name)
+inline static void print_version(const char *prog_name, bool verbose)
 {
-	printf("%s (Knot DNS), version %s\n", program_name, PACKAGE_VERSION);
+	if (prog_name != NULL) {
+		printf("%s, ", prog_name);
+	}
+	printf("Knot DNS %s\n", PACKAGE_VERSION);
+	if (verbose) {
+		printf("\n%s\n", configure_summary);
+	}
 }
 
 /*!

@@ -1,4 +1,4 @@
-/*  Copyright (C) 2023 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2024 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -117,7 +117,7 @@ static int zonesign(sign_params_t *params)
 			goto fail;
 		}
 
-		ret = knot_dnssec_validate_zone(&up, conf(), params->timestamp, false);
+		ret = knot_dnssec_validate_zone(&up, conf(), params->timestamp, false, false);
 		if (ret != KNOT_EOK) {
 			ERR2("DNSSEC validation failed (%s)", knot_strerror(ret));
 			char type_str[16];
@@ -204,7 +204,7 @@ int main(int argc, char *argv[])
 		{ "verify" ,   no_argument,       NULL, 'v' },
 		{ "time",      required_argument, NULL, 't' },
 		{ "help",      no_argument,       NULL, 'h' },
-		{ "version",   no_argument,       NULL, 'V' },
+		{ "version",   optional_argument, NULL, 'V' },
 		{ NULL }
 	};
 
@@ -212,7 +212,7 @@ int main(int argc, char *argv[])
 	signal_init_std();
 
 	int opt = 0;
-	while ((opt = getopt_long(argc, argv, "c:C:o:rvt:hV", opts, NULL)) != -1) {
+	while ((opt = getopt_long(argc, argv, "c:C:o:rvt:hV::", opts, NULL)) != -1) {
 		switch (opt) {
 		case 'c':
 			if (util_conf_init_file(optarg) != KNOT_EOK) {
@@ -245,7 +245,7 @@ int main(int argc, char *argv[])
 			print_help();
 			goto success;
 		case 'V':
-			print_version(PROGRAM_NAME);
+			print_version(PROGRAM_NAME, optarg != NULL);
 			goto success;
 		default:
 			print_help();

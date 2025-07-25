@@ -632,7 +632,7 @@ continues along the lines of :rfc:`6781#section-4.1.2`::
   2024-02-14T15:20:00+0100 info: [example.com.] DNSSEC, key, tag 36185, algorithm ECDSAP256SHA256, public, active
   2024-02-14T15:20:00+0100 info: [example.com.] DNSSEC, key, tag  3375, algorithm ECDSAP256SHA256, KSK, public, active+
   2024-02-14T15:20:00+0100 info: [example.com.] DNSSEC, signing started
-  2024-02-14T15:20:00+0100 info: [example.com.] DNSSEC, successfully signed, serial 2010111204
+  2024-02-14T15:20:00+0100 info: [example.com.] DNSSEC, successfully signed, serial 2010111204, new RRSIGs 3
   2024-02-14T15:20:00+0100 info: [example.com.] DNSSEC, next signing at 2024-02-14T15:20:12+0100
 
   ... (propagation-delay + dnskey-ttl) ...
@@ -643,20 +643,13 @@ continues along the lines of :rfc:`6781#section-4.1.2`::
   2024-02-14T15:20:12+0100 info: [example.com.] DNSSEC, key, tag 36185, algorithm ECDSAP256SHA256, public, active
   2024-02-14T15:20:12+0100 info: [example.com.] DNSSEC, key, tag  3375, algorithm ECDSAP256SHA256, KSK, public, ready, active+
   2024-02-14T15:20:12+0100 info: [example.com.] DNSSEC, signing started
-  2024-02-14T15:20:12+0100 info: [example.com.] DNSSEC, successfully signed, serial 2010111205
+  2024-02-14T15:20:12+0100 info: [example.com.] DNSSEC, successfully signed, serial 2010111205, new RRSIGs 6
   2024-02-14T15:20:12+0100 info: [example.com.] DNSSEC, next signing at 2024-02-28T15:19:37+0100
 
 At this point the new KSK has to be submitted to the parent zone. Knot detects the updated parent's DS
 record automatically (and waits for additional period of the DS's TTL before retiring the old key)
 if :ref:`parent DS check<Submission section>` is configured, otherwise the
-operator must confirm it manually (using ``knotc zone-ksk-submitted``)
-
-.. NOTE::
-  A DS record for the new KSK can be generated using:
-
-   ``$ keymgr example.com ds 3375``
-
-::
+operator must confirm it manually (using ``knotc zone-ksk-submitted``)::
 
   2024-02-14T15:20:12+0100 info: [example.com.] DS check, outgoing, remote 127.0.0.1@5300 TCP, KSK submission check: negative
   2024-02-14T15:20:14+0100 info: [example.com.] DS check, outgoing, remote 127.0.0.1@5300 TCP/pool, KSK submission check: negative
@@ -667,7 +660,7 @@ operator must confirm it manually (using ``knotc zone-ksk-submitted``)
   2024-02-14T15:20:16+0100 info: [example.com.] DNSSEC, key, tag 36185, algorithm ECDSAP256SHA256, public, active
   2024-02-14T15:20:16+0100 info: [example.com.] DNSSEC, key, tag  3375, algorithm ECDSAP256SHA256, KSK, public, active
   2024-02-14T15:20:16+0100 info: [example.com.] DNSSEC, signing started
-  2024-02-14T15:20:16+0100 info: [example.com.] DNSSEC, successfully signed, serial 2010111206
+  2024-02-14T15:20:16+0100 info: [example.com.] DNSSEC, successfully signed, serial 2010111206, new RRSIGs 2
   2024-02-14T15:20:16+0100 info: [example.com.] DNSSEC, next signing at 2024-02-14T15:20:23+0100
 
   ... (parent's DS TTL is 7 seconds) ...
@@ -677,7 +670,7 @@ operator must confirm it manually (using ``knotc zone-ksk-submitted``)
   2024-02-14T15:20:23+0100 info: [example.com.] DNSSEC, key, tag 36185, algorithm ECDSAP256SHA256, public, active
   2024-02-14T15:20:23+0100 info: [example.com.] DNSSEC, key, tag  3375, algorithm ECDSAP256SHA256, KSK, public, active
   2024-02-14T15:20:23+0100 info: [example.com.] DNSSEC, signing started
-  2024-02-14T15:20:23+0100 info: [example.com.] DNSSEC, successfully signed, serial 2010111207
+  2024-02-14T15:20:23+0100 info: [example.com.] DNSSEC, successfully signed, serial 2010111207, new RRSIGs 2
   2024-02-14T15:20:23+0100 info: [example.com.] DNSSEC, next signing at 2024-02-14T15:21:54+0100
 
 Upon the zone's ZSK lifetime expiration, a new ZSK is generated and the rollover
@@ -692,7 +685,7 @@ continues along the lines of :rfc:`6781#section-4.1.1`::
   2024-02-14T15:21:54+0100 info: [example.com.] DNSSEC, key, tag  3375, algorithm ECDSAP256SHA256, KSK, public, active
   2024-02-14T15:21:54+0100 info: [example.com.] DNSSEC, key, tag 38559, algorithm ECDSAP256SHA256, public
   2024-02-14T15:21:54+0100 info: [example.com.] DNSSEC, signing started
-  2024-02-14T15:21:54+0100 info: [example.com.] DNSSEC, successfully signed, serial 2010111208
+  2024-02-14T15:21:54+0100 info: [example.com.] DNSSEC, successfully signed, serial 2010111208, new RRSIGs 2
   2024-02-14T15:21:54+0100 info: [example.com.] DNSSEC, next signing at 2024-02-14T15:22:06+0100
 
   ... (propagation-delay + dnskey-ttl) ...
@@ -703,7 +696,7 @@ continues along the lines of :rfc:`6781#section-4.1.1`::
   2024-02-14T15:22:06+0100 info: [example.com.] DNSSEC, key, tag  3375, algorithm ECDSAP256SHA256, KSK, public, active
   2024-02-14T15:22:06+0100 info: [example.com.] DNSSEC, key, tag 38559, algorithm ECDSAP256SHA256, public, active
   2024-02-14T15:22:06+0100 info: [example.com.] DNSSEC, signing started
-  2024-02-14T15:22:06+0100 info: [example.com.] DNSSEC, successfully signed, serial 2010111209
+  2024-02-14T15:22:06+0100 info: [example.com.] DNSSEC, successfully signed, serial 2010111209, new RRSIGs 14
   2024-02-14T15:22:06+0100 info: [example.com.] DNSSEC, next signing at 2024-02-14T15:22:23+0100
 
   ... (propagation-delay + zone-max-ttl) ...
@@ -713,7 +706,7 @@ continues along the lines of :rfc:`6781#section-4.1.1`::
   2024-02-14T15:22:23+0100 info: [example.com.] DNSSEC, key, tag  3375, algorithm ECDSAP256SHA256, KSK, public, active
   2024-02-14T15:22:23+0100 info: [example.com.] DNSSEC, key, tag 38559, algorithm ECDSAP256SHA256, public, active
   2024-02-14T15:22:23+0100 info: [example.com.] DNSSEC, signing started
-  2024-02-14T15:22:23+0100 info: [example.com.] DNSSEC, successfully signed, serial 2010111210
+  2024-02-14T15:22:23+0100 info: [example.com.] DNSSEC, successfully signed, serial 2010111210, new RRSIGs 2
   2024-02-14T15:22:23+0100 info: [example.com.] DNSSEC, next signing at 2024-02-14T15:24:06+0100
 
 Further rollovers::
@@ -729,7 +722,7 @@ Further rollovers::
   2024-02-14T15:24:06+0100 info: [example.com.] DNSSEC, key, tag 38559, algorithm ECDSAP256SHA256, public, active
   2024-02-14T15:24:06+0100 info: [example.com.] DNSSEC, key, tag 59825, algorithm ECDSAP256SHA256, public
   2024-02-14T15:24:06+0100 info: [example.com.] DNSSEC, signing started
-  2024-02-14T15:24:06+0100 info: [example.com.] DNSSEC, successfully signed, serial 2010111211
+  2024-02-14T15:24:06+0100 info: [example.com.] DNSSEC, successfully signed, serial 2010111211, new RRSIGs 2
   2024-02-14T15:24:06+0100 info: [example.com.] DNSSEC, next signing at 2024-02-14T15:24:18+0100
 
   ...
@@ -743,7 +736,7 @@ Further rollovers::
   2024-02-14T15:25:00+0100 info: [example.com.] DNSSEC, key, tag 59825, algorithm ECDSAP256SHA256, public, active
   2024-02-14T15:25:00+0100 info: [example.com.] DNSSEC, key, tag 50822, algorithm ECDSAP256SHA256, KSK, public, active+
   2024-02-14T15:25:00+0100 info: [example.com.] DNSSEC, signing started
-  2024-02-14T15:25:00+0100 info: [example.com.] DNSSEC, successfully signed, serial 2010111214
+  2024-02-14T15:25:00+0100 info: [example.com.] DNSSEC, successfully signed, serial 2010111214, new RRSIGs 3
   2024-02-14T15:25:00+0100 info: [example.com.] DNSSEC, next signing at 2024-02-14T15:25:12+0100
 
   ...
@@ -1289,12 +1282,12 @@ if the backup was created for only a subset of zones.
    turns off some verification checks, it shouldn't be used in other cases.
 
 .. NOTE::
-   For QUIC, only the auto-generated key is restored. The ``zone-restore``
-   command doesn't restore a user-defined QUIC key and certificate so as to
+   For QUIC/TLS, only the auto-generated key is restored. The ``zone-restore``
+   command doesn't restore a user-defined QUIC/TLS key and certificate so as to
    avoid possible configuration management conflicts and they must be restored
    from the backup (its subdirectory ``quic``) manually. In all cases,
    restart of the Knot server after the restore is necessary for the restored
-   QUIC key/certificate to take effect.
+   QUIC/TLS key/certificate to take effect.
 
 Limitations
 -----------
@@ -1382,9 +1375,15 @@ Pre-requisites
 * A multiqueue network card, which offers enough Combined RX/TX channels, with
   native XDP support is highly recommended. Successfully tested cards:
 
+  * NVIDIA (Mellanox) ConnectX-6 Dx (driver `mlx5_core`), maximum number of channels
+    per interface is 63. Official drivers are recommended.
   * Intel series 700 (driver `i40e`), maximum number of channels per interface is 64.
-  * Intel series 500 (driver `ixgbe`), maximum number of channels per interface is 64.
-    The number of CPUs available has to be at most 64!
+    Linux kernel drivers are recommended.
+
+  Cards with known instability issues:
+
+  * Intel series E810 (driver `ice`).
+  * Intel series 500 (driver `ixgbe`).
 
 * If the `knotd` service is not directly executed in the privileged mode, some
   additional Linux capabilities have to be set:

@@ -42,6 +42,9 @@ debug = False
 # Number of available loopback addreeses per each IP version
 addresses = 1
 
+# Indication of allowed XDP testing
+xdp = False
+
 # KNOT_TEST_VALGRIND - valgrind binary if defined.
 valgrind_bin = get_binary("KNOT_TEST_VALGRIND", "valgrind")
 # KNOT_TEST_VALGRIND_FLAGS - valgrind flags.
@@ -63,6 +66,8 @@ knot_ctl = get_binary("KNOT_TEST_KNOTC", repo_binary("src/knotc"))
 keymgr_bin = get_binary("KNOT_TEST_KEYMGR", repo_binary("src/keymgr"))
 # KNOT_TEST_KJOURNALPRINT - Knot journal print binary.
 kjournalprint_bin = get_binary("KNOT_TEST_KJOURNALPRINT", repo_binary("src/kjournalprint"))
+# KNOT_TEST_KNSUPDATE - Knot dynamic DNS update binary.
+knsupdate_bin = get_binary("KNOT_TEST_KNSUPDATE", repo_binary("src/knsupdate"))
 # KNOT_TEST_KCATALOGPRINT - Knot catalog print binary.
 kcatalogprint_bin = get_binary("KNOT_TEST_KCATALOGPRINT", repo_binary("src/kcatalogprint"))
 # KNOT_TEST_BIND - Bind binary.

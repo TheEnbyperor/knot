@@ -17,7 +17,7 @@ RUN apt-get -y install \
 	libedit-dev \
 	libfstrm-dev \
 	libgnutls28-dev \
-	libidn2-0-dev \
+	libidn2-dev \
 	liblmdb-dev \
 	libmaxminddb-dev \
 	libmnl-dev \
@@ -26,10 +26,10 @@ RUN apt-get -y install \
 	libsystemd-dev \
 	libtool \
 	liburcu-dev \
+	libxdp-dev \
 	pkg-config \
 	protobuf-c-compiler \
 	python3-sphinx \
-	texinfo \
 	texlive \
 	texlive-font-utils \
 	texlive-latex-extra \

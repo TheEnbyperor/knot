@@ -38,8 +38,8 @@ struct ds_push_data {
 
 #define DS_PUSH_LOG(priority, zone, remote, flags, fmt, ...) \
 	ns_log(priority, zone, LOG_OPERATION_DS_PUSH, LOG_DIRECTION_OUT, &(remote)->addr, \
-	       ((flags) & KNOT_REQUESTOR_QUIC) ? KNOTD_QUERY_PROTO_QUIC : KNOTD_QUERY_PROTO_TCP, \
-	       ((flags) & KNOT_REQUESTOR_REUSED), (remote)->key.name, fmt, ## __VA_ARGS__)
+	       flags2proto(flags), ((flags) & KNOT_REQUESTOR_REUSED), (remote)->key.name, \
+	       fmt, ## __VA_ARGS__)
 
 static const knot_rdata_t remove_cds = { 5, { 0, 0, 0, 0, 0 } };
 
@@ -53,7 +53,7 @@ static int ds_push_begin(knot_layer_t *layer, void *params)
 static int parent_soa_produce(struct ds_push_data *data, knot_pkt_t *pkt)
 {
 	assert(data->parent_query[0] != '\0');
-	data->parent_query = knot_wire_next_label(data->parent_query, NULL);
+	data->parent_query = knot_dname_next_label(data->parent_query);
 
 	int ret = knot_pkt_put_question(pkt, data->parent_query, KNOT_CLASS_IN, KNOT_RRTYPE_SOA);
 	if (ret != KNOT_EOK) {

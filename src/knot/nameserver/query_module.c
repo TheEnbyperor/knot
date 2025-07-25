@@ -32,17 +32,6 @@
 #include "knot/nameserver/query_module.h"
 #include "knot/nameserver/process_query.h"
 
-#ifdef HAVE_ATOMIC
- #define ATOMIC_ADD(dst, val) __atomic_add_fetch(&(dst), (val), __ATOMIC_RELAXED)
- #define ATOMIC_SUB(dst, val) __atomic_sub_fetch(&(dst), (val), __ATOMIC_RELAXED)
- #define ATOMIC_SET(dst, val) __atomic_store_n(&(dst), (val), __ATOMIC_RELAXED)
-#else
- #warning "Statistics data can be inaccurate"
- #define ATOMIC_ADD(dst, val) ((dst) += (val))
- #define ATOMIC_SUB(dst, val) ((dst) -= (val))
- #define ATOMIC_SET(dst, val) ((dst) = (val))
-#endif
-
 _public_
 int knotd_conf_check_ref(knotd_conf_check_args_t *args)
 {
@@ -79,30 +68,31 @@ void query_plan_free(struct query_plan *plan)
 	free(plan);
 }
 
-static struct query_step *make_step(query_step_process_f process, void *ctx)
-{
-	struct query_step *step = calloc(1, sizeof(struct query_step));
-	if (step == NULL) {
-		return NULL;
-	}
-
-	step->process = process;
-	step->ctx = ctx;
-
-	return step;
-}
-
 int query_plan_step(struct query_plan *plan, knotd_stage_t stage,
-                    query_step_process_f process, void *ctx)
+                    query_hook_type_t type, void *hook, void *ctx)
 {
-	struct query_step *step = make_step(process, ctx);
+	struct query_step *step = calloc(1, sizeof(*step));
 	if (step == NULL) {
 		return KNOT_ENOMEM;
 	}
 
+	step->type = type;
+	step->general_hook = hook;
+	step->ctx = ctx;
+
 	add_tail(&plan->stage[stage], &step->node);
 
 	return KNOT_EOK;
+}
+
+_public_
+int knotd_mod_proto_hook(knotd_mod_t *mod, knotd_stage_t stage, knotd_mod_proto_hook_f hook)
+{
+	if (stage != KNOTD_STAGE_PROTO_BEGIN && stage != KNOTD_STAGE_PROTO_END) {
+		return KNOT_EINVAL;
+	}
+
+	return query_plan_step(mod->plan, stage, QUERY_HOOK_TYPE_PROTO, hook,  mod);
 }
 
 _public_
@@ -112,17 +102,18 @@ int knotd_mod_hook(knotd_mod_t *mod, knotd_stage_t stage, knotd_mod_hook_f hook)
 		return KNOT_EINVAL;
 	}
 
-	return query_plan_step(mod->plan, stage, hook, mod);
+	return query_plan_step(mod->plan, stage, QUERY_HOOK_TYPE_GENERAL, hook, mod);
 }
 
 _public_
 int knotd_mod_in_hook(knotd_mod_t *mod, knotd_stage_t stage, knotd_mod_in_hook_f hook)
 {
-	if (stage == KNOTD_STAGE_BEGIN || stage == KNOTD_STAGE_END) {
+	if (stage != KNOTD_STAGE_PREANSWER && stage != KNOTD_STAGE_ANSWER &&
+	    stage != KNOTD_STAGE_AUTHORITY && stage != KNOTD_STAGE_ADDITIONAL) {
 		return KNOT_EINVAL;
 	}
 
-	return query_plan_step(mod->plan, stage, hook, mod);
+	return query_plan_step(mod->plan, stage, QUERY_HOOK_TYPE_IN, hook, mod);
 }
 
 knotd_mod_t *query_module_open(conf_t *conf, server_t *server, conf_mod_id_t *mod_id,
@@ -313,8 +304,8 @@ int knotd_mod_stats_add(knotd_mod_t *mod, const char *ctr_name, uint32_t idx_cou
 		stats += mod->stats_count;
 
 		for (unsigned i = 0; i < threads; i++) {
-			uint64_t *new_vals = realloc(mod->stats_vals[i],
-			                             (offset + idx_count) * sizeof(*new_vals));
+			knot_atomic_uint64_t *new_vals = realloc(mod->stats_vals[i],
+			                                 (offset + idx_count) * sizeof(*new_vals));
 			if (new_vals == NULL) {
 				knotd_mod_stats_free(mod);
 				return KNOT_ENOMEM;
@@ -627,6 +618,7 @@ uint32_t knotd_qdata_rtt(knotd_qdata_t *qdata)
 
 	switch (qdata->params->proto) {
 	case KNOTD_QUERY_PROTO_TCP:
+	case KNOTD_QUERY_PROTO_TLS:
 		if (qdata->params->xdp_msg != NULL) {
 #ifdef ENABLE_XDP
 			return qdata->params->measured_rtt;

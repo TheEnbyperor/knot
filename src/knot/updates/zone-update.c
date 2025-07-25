@@ -1,4 +1,4 @@
-/*  Copyright (C) 2023 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2024 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -19,8 +19,8 @@
 #include <urcu.h>
 
 #include "knot/catalog/interpret.h"
+#include "knot/common/dbus.h"
 #include "knot/common/log.h"
-#include "knot/common/systemd.h"
 #include "knot/dnssec/zone-events.h"
 #include "knot/server/server.h"
 #include "knot/updates/zone-update.h"
@@ -942,26 +942,10 @@ int zone_update_commit(conf_t *conf, zone_update_t *update)
 	val = conf_zone_get(conf, C_DNSSEC_VALIDATION, update->zone->name);
 	if (conf_bool(&val)) {
 		bool incr_valid = update->flags & UPDATE_INCREMENTAL;
-		const char *msg_valid = incr_valid ? "incremental " : "";
-
-		ret = knot_dnssec_validate_zone(update, conf, 0, incr_valid);
+		ret = knot_dnssec_validate_zone(update, conf, 0, incr_valid, true);
 		if (ret != KNOT_EOK) {
-			log_zone_error(update->zone->name, "DNSSEC, %svalidation failed (%s)",
-			               msg_valid, knot_strerror(ret));
-			char type_str[16];
-			knot_dname_txt_storage_t name_str;
-			if (knot_dname_to_str(name_str, update->validation_hint.node, sizeof(name_str)) != NULL &&
-			    knot_rrtype_to_string(update->validation_hint.rrtype, type_str, sizeof(type_str)) >= 0) {
-				log_zone_error(update->zone->name, "DNSSEC, validation hint: %s %s",
-				               name_str, type_str);
-			}
 			discard_adds_tree(update);
-			if (conf->cache.srv_dbus_event & DBUS_EVENT_ZONE_INVALID) {
-				systemd_emit_zone_invalid(update->zone->name);
-			}
 			return ret;
-		} else {
-			log_zone_info(update->zone->name, "DNSSEC, %svalidation successful", msg_valid);
 		}
 	}
 
@@ -1023,8 +1007,8 @@ int zone_update_commit(conf_t *conf, zone_update_t *update)
 	}
 
 	if (conf->cache.srv_dbus_event & DBUS_EVENT_ZONE_UPDATED) {
-		systemd_emit_zone_updated(update->zone->name,
-		                          zone_contents_serial(update->zone->contents));
+		dbus_emit_zone_updated(update->zone->name,
+		                       zone_contents_serial(update->zone->contents));
 	}
 
 	memset(update, 0, sizeof(*update));

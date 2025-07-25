@@ -213,11 +213,13 @@ int kdnssec_ctx_init(conf_t *conf, kdnssec_ctx_t *ctx, const knot_dname_t *zone_
 		goto init_error;
 	}
 
-	ctx->policy = calloc(1, sizeof(*ctx->policy));
+	ctx->policy = calloc(1, sizeof(*ctx->policy) + sizeof(*ctx->stats));
 	if (ctx->policy == NULL) {
 		ret = KNOT_ENOMEM;
 		goto init_error;
 	}
+	ctx->stats = (void *)ctx->policy + sizeof(*ctx->policy);
+	knot_spin_init(&ctx->stats->lock);
 
 	ret = kasp_db_get_saved_ttls(ctx->kasp_db, zone_name,
 	                             &ctx->policy->saved_max_ttl,
@@ -287,6 +289,7 @@ void kdnssec_ctx_deinit(kdnssec_ctx_t *ctx)
 	}
 
 	if (ctx->policy != NULL) {
+		knot_spin_destroy(&ctx->stats->lock);
 		free(ctx->policy->string);
 		knot_dynarray_foreach(parent, knot_kasp_parent_t, i, ctx->policy->parents) {
 			free(i->addr);
@@ -331,18 +334,22 @@ int kdnssec_validation_ctx(conf_t *conf, kdnssec_ctx_t *ctx, const zone_contents
 		return KNOT_ENOMEM;
 	}
 
-	ctx->policy = calloc(1, sizeof(*ctx->policy));
+	ctx->policy = calloc(1, sizeof(*ctx->policy) + sizeof(*ctx->stats));
 	if (ctx->policy == NULL) {
 		free(ctx->zone);
 		return KNOT_ENOMEM;
 	}
+	ctx->stats = (void *)ctx->policy + sizeof(*ctx->policy);
+	knot_spin_init(&ctx->stats->lock);
 
 	policy_from_zone(ctx->policy, zone);
 	if (conf != NULL) {
 		conf_val_t policy_id = conf_zone_get(conf, C_DNSSEC_POLICY, zone->apex->owner);
 		conf_id_fix_default(&policy_id);
-		conf_val_t num_threads = conf_id_get(conf, C_POLICY, C_SIGNING_THREADS, &policy_id);
-		ctx->policy->signing_threads = conf_int(&num_threads);
+		conf_val_t val = conf_id_get(conf, C_POLICY, C_SIGNING_THREADS, &policy_id);
+		ctx->policy->signing_threads = conf_int(&val);
+		val = conf_id_get(conf, C_POLICY, C_RRSIG_REFRESH, &policy_id);
+		ctx->policy->rrsig_refresh_before = conf_int_alt(&val, true);
 	} else {
 		ctx->policy->signing_threads = MAX(dt_optimal_size(), 1);
 	}

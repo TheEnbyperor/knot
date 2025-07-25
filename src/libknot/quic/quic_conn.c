@@ -1,4 +1,4 @@
-/*  Copyright (C) 2023 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2024 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -29,6 +29,7 @@
 #include "libdnssec/random.h"
 #include "libknot/attribute.h"
 #include "libknot/error.h"
+#include "libknot/quic/tls_common.h"
 #include "libknot/quic/quic.h"
 #include "libknot/xdp/tcp_iobuf.h"
 #include "libknot/wire.h"
@@ -45,7 +46,7 @@ static int cmp_expiry_heap_nodes(void *c1, void *c2)
 
 _public_
 knot_quic_table_t *knot_quic_table_new(size_t max_conns, size_t max_ibufs, size_t max_obufs,
-                                       size_t udp_payload, struct knot_quic_creds *creds)
+                                       size_t udp_payload, struct knot_creds *creds)
 {
 	size_t table_size = max_conns * BUCKETS_PER_CONNS;
 
@@ -61,9 +62,17 @@ knot_quic_table_t *knot_quic_table_new(size_t max_conns, size_t max_ibufs, size_
 	res->obufs_max = max_obufs;
 	res->udp_payload_limit = udp_payload;
 
+	int ret = gnutls_priority_init2(&res->priority, KNOT_TLS_PRIORITIES, NULL,
+	                                GNUTLS_PRIORITY_INIT_DEF_APPEND);
+	if (ret != GNUTLS_E_SUCCESS) {
+		free(res);
+		return NULL;
+	}
+
 	res->expiry_heap = malloc(sizeof(struct heap));
 	if (res->expiry_heap == NULL || !heap_init(res->expiry_heap, cmp_expiry_heap_nodes, 0)) {
 		free(res->expiry_heap);
+		gnutls_priority_deinit(res->priority);
 		free(res);
 		return NULL;
 	}
@@ -92,6 +101,7 @@ void knot_quic_table_free(knot_quic_table_t *table)
 		assert(table->ibufs_size == 0);
 		assert(table->obufs_size == 0);
 
+		gnutls_priority_deinit(table->priority);
 		heap_deinit(table->expiry_heap);
 		free(table->expiry_heap);
 		free(table);
@@ -118,7 +128,9 @@ void knot_quic_table_sweep(knot_quic_table_t *table, struct knot_quic_reply *swe
 
 	while (!EMPTY_HEAP(table->expiry_heap)) {
 		knot_quic_conn_t *c = *(knot_quic_conn_t **)HHEAD(table->expiry_heap);
-		if (table->usage > table->max_conns) {
+		if ((c->flags & KNOT_QUIC_CONN_BLOCKED)) {
+			break; // highly inprobable
+		} else if (table->usage > table->max_conns) {
 			knot_sweep_stats_incr(stats, KNOT_SWEEP_CTR_LIMIT_CONN);
 			send_excessive_load(c, sweep_reply, table);
 			knot_quic_table_rem(c, table);
@@ -476,7 +488,7 @@ uint8_t *knot_quic_stream_add_data(knot_quic_conn_t *conn, int64_t stream_id,
 	add_tail((list_t *)&s->outbufs, (node_t *)obuf);
 	s->obufs_size += obuf->len;
 	conn->obufs_size += obuf->len;
-	conn->quic_table->obufs_size += obuf->len;
+	ATOMIC_ADD(conn->quic_table->obufs_size, obuf->len);
 
 	return obuf->buf + prefix;
 }
@@ -497,7 +509,7 @@ void knot_quic_stream_ack_data(knot_quic_conn_t *conn, int64_t stream_id,
 		assert(HEAD(*obs) != first); // help CLANG analyzer understand what rem_node did and that further usage of HEAD(*obs) is safe
 		s->obufs_size -= first->len;
 		conn->obufs_size -= first->len;
-		conn->quic_table->obufs_size -= first->len;
+		ATOMIC_SUB(conn->quic_table->obufs_size, first->len);
 		s->first_offset += first->len;
 		free(first);
 		if (s->unsent_obuf == first) {
@@ -552,6 +564,19 @@ void knot_quic_stream_mark_sent(knot_quic_conn_t *conn, int64_t stream_id,
 		if (s->unsent_obuf->node.next == NULL) { // already behind the tail of list
 			s->unsent_obuf = NULL;
 		}
+	}
+}
+
+_public_
+void knot_quic_conn_block(knot_quic_conn_t *conn, bool block)
+{
+	if (block) {
+		conn->flags |= KNOT_QUIC_CONN_BLOCKED;
+		conn->next_expiry = UINT64_MAX;
+		conn_heap_reschedule(conn, conn->quic_table);
+	} else {
+		conn->flags &= ~KNOT_QUIC_CONN_BLOCKED;
+		quic_conn_mark_used(conn, conn->quic_table);
 	}
 }
 

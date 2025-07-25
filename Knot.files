@@ -1,4 +1,5 @@
 src/contrib/asan.h
+src/contrib/atomic.h
 src/contrib/base32hex.c
 src/contrib/base32hex.h
 src/contrib/base64.c
@@ -169,6 +170,8 @@ src/knot/catalog/generate.c
 src/knot/catalog/generate.h
 src/knot/catalog/interpret.c
 src/knot/catalog/interpret.h
+src/knot/common/dbus.c
+src/knot/common/dbus.h
 src/knot/common/evsched.c
 src/knot/common/evsched.h
 src/knot/common/fdset.c
@@ -251,6 +254,7 @@ src/knot/events/handlers/load.c
 src/knot/events/handlers/notify.c
 src/knot/events/handlers/refresh.c
 src/knot/events/handlers/update.c
+src/knot/events/handlers/validate.c
 src/knot/events/replan.c
 src/knot/events/replan.h
 src/knot/include/module.h
@@ -281,6 +285,10 @@ src/knot/modules/probe/probe.c
 src/knot/modules/queryacl/queryacl.c
 src/knot/modules/rrl/functions.c
 src/knot/modules/rrl/functions.h
+src/knot/modules/rrl/kru-avx2.c
+src/knot/modules/rrl/kru-generic.c
+src/knot/modules/rrl/kru.h
+src/knot/modules/rrl/kru.inc.c
 src/knot/modules/rrl/rrl.c
 src/knot/modules/stats/stats.c
 src/knot/modules/synthrecord/synthrecord.c
@@ -317,6 +325,8 @@ src/knot/query/quic-requestor.c
 src/knot/query/quic-requestor.h
 src/knot/query/requestor.c
 src/knot/query/requestor.h
+src/knot/query/tls-requestor.c
+src/knot/query/tls-requestor.h
 src/knot/server/dthreads.c
 src/knot/server/dthreads.h
 src/knot/server/handler.c
@@ -482,6 +492,10 @@ src/libknot/quic/quic.c
 src/libknot/quic/quic.h
 src/libknot/quic/quic_conn.c
 src/libknot/quic/quic_conn.h
+src/libknot/quic/tls.c
+src/libknot/quic/tls.h
+src/libknot/quic/tls_common.c
+src/libknot/quic/tls_common.h
 src/libknot/rdata.h
 src/libknot/rdataset.c
 src/libknot/rdataset.h
@@ -613,6 +627,9 @@ src/utils/kxdpgun/ip_route.h
 src/utils/kxdpgun/load_queries.c
 src/utils/kxdpgun/load_queries.h
 src/utils/kxdpgun/main.c
+src/utils/kxdpgun/main.h
+src/utils/kxdpgun/stats.c
+src/utils/kxdpgun/stats.h
 src/utils/kzonecheck/main.c
 src/utils/kzonecheck/zone_check.c
 src/utils/kzonecheck/zone_check.h
@@ -626,6 +643,7 @@ tests-fuzz/knotd_wrap/server.c
 tests-fuzz/knotd_wrap/tcp-handler.c
 tests-fuzz/knotd_wrap/udp-handler.c
 tests-fuzz/main.c
+tests/contrib/test_atomic.c
 tests/contrib/test_base32hex.c
 tests/contrib/test_base64.c
 tests/contrib/test_base64url.c

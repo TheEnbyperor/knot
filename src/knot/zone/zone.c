@@ -180,6 +180,7 @@ zone_t* zone_new(const knot_dname_t *name)
 	zone->ddns_queue_size = 0;
 	init_list(&zone->ddns_queue);
 
+	pthread_mutex_init(&zone->cu_lock, NULL);
 	knot_sem_init(&zone->cow_lock, 1);
 
 	// Preferred master lock
@@ -222,6 +223,7 @@ void zone_free(zone_t **zone_ptr)
 	free_ddns_queue(zone);
 	pthread_mutex_destroy(&zone->ddns_lock);
 
+	pthread_mutex_destroy(&zone->cu_lock);
 	knot_sem_destroy(&zone->cow_lock);
 
 	/* Control update. */
@@ -273,6 +275,12 @@ void zone_reset(conf_t *conf, zone_t *zone)
 	} \
 }
 
+// UBSAN type punning workaround
+static bool dname_cmp_sweep_wrap(const uint8_t *zone, void *data)
+{
+	return knot_dname_cmp((const knot_dname_t *)zone, (const knot_dname_t *)data) != 0;
+}
+
 int selective_zone_purge(conf_t *conf, zone_t *zone, purge_flag_t params)
 {
 	if (conf == NULL || zone == NULL) {
@@ -285,19 +293,13 @@ int selective_zone_purge(conf_t *conf, zone_t *zone, purge_flag_t params)
 
 	// Purge the zone timers.
 	if (params & PURGE_ZONE_TIMERS) {
-		bool member = (zone->catalog_gen != NULL);
 		zone->timers = (zone_timers_t) {
-			.catalog_member = member ? zone->timers.catalog_member : 0
+			.catalog_member = zone->timers.catalog_member
 		};
-		if (member) {
-			ret = zone_timers_write(&zone->server->timerdb, zone->name,
-			                        &zone->timers);
-		} else {
-			ret = zone_timers_sweep(&zone->server->timerdb,
-			                        (sweep_cb)knot_dname_cmp, zone->name);
-		}
 		zone_timers_sanitize(conf, zone);
 		zone->zonefile.bootstrap_cnt = 0;
+		ret = zone_timers_sweep(&zone->server->timerdb,
+		                        dname_cmp_sweep_wrap, zone->name);
 		RETURN_IF_FAILED("timers", KNOT_ENOENT);
 	}
 
@@ -331,6 +333,7 @@ int selective_zone_purge(conf_t *conf, zone_t *zone, purge_flag_t params)
 
 	// Purge Catalog.
 	if (params & PURGE_ZONE_CATALOG) {
+		zone->timers.catalog_member = 0;
 		ret = catalog_zone_purge(zone->server, conf, zone->name);
 		RETURN_IF_FAILED("catalog", KNOT_EOK);
 	}

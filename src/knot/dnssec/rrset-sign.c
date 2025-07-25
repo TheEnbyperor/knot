@@ -1,4 +1,4 @@
-/*  Copyright (C) 2022 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2024 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -157,13 +157,13 @@ static int sign_ctx_add_self(dnssec_sign_ctx_t *ctx, const uint8_t *rdata)
  */
 static int sign_ctx_add_records(dnssec_sign_ctx_t *ctx, const knot_rrset_t *covered)
 {
-	size_t rrwl = knot_rrset_size(covered);
+	size_t rrwl = knot_rrset_size_estimate(covered);
 	uint8_t *rrwf = malloc(rrwl);
 	if (!rrwf) {
 		return KNOT_ENOMEM;
 	}
 
-	int written = knot_rrset_to_wire_extra(covered, rrwf, rrwl, 0, NULL, KNOT_PF_BUFENOUGH);
+	int written = knot_rrset_to_wire_extra(covered, rrwf, rrwl, 0, NULL, 0);
 	if (written < 0) {
 		free(rrwf);
 		return written;
@@ -263,7 +263,7 @@ static int rrsigs_create_rdata(knot_rrset_t *rrsigs, dnssec_sign_ctx_t *ctx,
 
 int knot_sign_rrset(knot_rrset_t *rrsigs, const knot_rrset_t *covered,
                     const dnssec_key_t *key, dnssec_sign_ctx_t *sign_ctx,
-                    const kdnssec_ctx_t *dnssec_ctx, knot_mm_t *mm, knot_time_t *expires)
+                    const kdnssec_ctx_t *dnssec_ctx, knot_mm_t *mm)
 {
 	if (knot_rrset_empty(covered) || !key || !sign_ctx || !dnssec_ctx ||
 	    rrsigs->type != KNOT_RRTYPE_RRSIG ||
@@ -279,8 +279,11 @@ int knot_sign_rrset(knot_rrset_t *rrsigs, const knot_rrset_t *covered,
 
 	int ret = rrsigs_create_rdata(rrsigs, sign_ctx, covered, key, (uint32_t)sig_incept,
 	                              (uint32_t)sig_expire, sign_flags, mm);
-	if (ret == KNOT_EOK && expires != NULL) {
-		*expires = knot_time_min(*expires, sig_expire);
+	if (ret == KNOT_EOK) {
+		knot_spin_lock(&dnssec_ctx->stats->lock);
+		dnssec_ctx->stats->rrsig_count++;
+		dnssec_ctx->stats->expire = knot_time_min(dnssec_ctx->stats->expire, sig_expire);
+		knot_spin_unlock(&dnssec_ctx->stats->lock);
 	}
 	return ret;
 }
@@ -300,7 +303,7 @@ int knot_sign_rrset2(knot_rrset_t *rrsigs, const knot_rrset_t *rrset,
 		}
 
 		int ret = knot_sign_rrset(rrsigs, rrset, key->key, sign_ctx->sign_ctxs[i],
-		                          sign_ctx->dnssec_ctx, mm, NULL);
+		                          sign_ctx->dnssec_ctx, mm);
 		if (ret != KNOT_EOK) {
 			return ret;
 		}

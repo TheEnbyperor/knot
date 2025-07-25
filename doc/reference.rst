@@ -20,9 +20,10 @@ the following symbols:
 - ``STR`` – Textual string
 - ``HEXSTR`` – Hexadecimal string (with ``0x`` prefix)
 - ``BOOL`` – Boolean value (``on``/``off`` or ``true``/``false``)
-- ``TIME`` – Number of seconds, an integer with possible time multiplier suffix
-  (``s`` ~ 1, ``m`` ~ 60, ``h`` ~ 3600 or ``d`` ~ 24 * 3600)
-- ``SIZE`` – Number of bytes, an integer with possible size multiplier suffix
+- ``TIME`` – Number of seconds, an integer with a possible time multiplier suffix
+  (``s`` ~ 1, ``m`` ~ 60, ``h`` ~ 3600, ``d`` ~ 24 * 3600, ``w`` ~ 7 * 24 * 3600,
+  ``M`` ~ 30 * 24 * 3600, ``y`` ~ 365 * 24 * 3600)
+- ``SIZE`` – Number of bytes, an integer with a possible size multiplier suffix
   (``B`` ~ 1, ``K`` ~ 1024, ``M`` ~ 1024^2 or ``G`` ~ 1024^3)
 - ``BASE64`` – Base64 encoded string
 - ``ADDR`` – IPv4 or IPv6 address
@@ -217,6 +218,7 @@ General options related to the server.
      dbus-init-delay: TIME
      listen: ADDR[@INT] | STR ...
      listen-quic: ADDR[@INT] ...
+     listen-tls: ADDR[@INT] ...
 
 .. CAUTION::
    When you change configuration parameters dynamically or via configuration file
@@ -561,11 +563,9 @@ Maximum EDNS0 UDP payload size for IPv6.
 key-file
 --------
 
-Path to a server key PEM file which is used for DNS over QUIC communication.
+Path to a server key PEM file which is used for DNS over QUIC/TLS communication.
 A non-absolute path of a user specified key file is relative to the
 :file:`@config_dir@` directory.
-
-Change of this parameter requires restart of the Knot server to take effect.
 
 *Default:* auto-generated key
 
@@ -574,10 +574,8 @@ Change of this parameter requires restart of the Knot server to take effect.
 cert-file
 ---------
 
-Path to a server certificate PEM file which is used for DNS over QUIC communication.
+Path to a server certificate PEM file which is used for DNS over QUIC/TLS communication.
 A non-absolute path is relative to the :file:`@config_dir@` directory.
-
-Change of this parameter requires restart of the Knot server to take effect.
 
 *Default:* one-time in-memory certificate
 
@@ -646,16 +644,17 @@ Possible values:
   - ``stopped`` when the server shutdown sequence is initiated.
 - ``zone-updated`` – The signal ``zone_updated`` is emitted when a zone has been updated;
   the signal parameters are `zone name` and `zone SOA serial`.
-- ``keys-updated`` - The signal ``keys_updated`` is emitted when a DNSSEC key set 
-  of this zone is updated.
+- ``keys-updated`` - The signal ``keys_updated`` is emitted when a DNSSEC key set
+  is updated; the signal parameter is `zone name`.
 - ``ksk-submission`` – The signal ``zone_ksk_submission`` is emitted if there is
   a ready KSK present when the zone is signed; the signal parameters are
   `zone name`, `KSK keytag`, and `KSK KASP id`.
 - ``dnssec-invalid`` – The signal ``zone_dnssec_invalid`` is emitted when DNSSEC
-  validation fails; the signal parameter is `zone name`.
+  validation fails; the signal parameters are `zone name`, and `remaining seconds`
+  until an RRSIG expires.
 
 .. NOTE::
-   This function requires systemd version at least 221.
+   This function requires systemd version at least 221 or libdbus.
 
 Change of this parameter requires restart of the Knot server to take effect.
 
@@ -704,9 +703,17 @@ Change of this parameter requires restart of the Knot server to take effect.
 
 *Default:* not set
 
-.. NOTE::
-   Incoming :ref:`DDNS<dynamic updates>` over QUIC isn't supported.
-   The server always responds with SERVFAIL.
+.. _server_listen-tls:
+
+listen-tls
+----------
+
+One or more IP addresses (and optionally ports) where the server listens
+for incoming queries over TLS protocol (DoT).
+
+Change of this parameter requires restart of the Knot server to take effect.
+
+*Default:* not set
 
 .. _xdp section:
 
@@ -730,6 +737,9 @@ Various options related to XDP listening, especially TCP.
      tcp-idle-reset-timeout: TIME
      tcp-resend-timeout: TIME
      route-check: BOOL
+     ring-size: INT
+     busypoll-budget: INT
+     busypoll-timeout: INT
 
 .. CAUTION::
    When you change configuration parameters dynamically or via configuration file
@@ -911,6 +921,57 @@ Change of this parameter requires restart of the Knot server to take effect.
    Only VLAN 802.1Q is supported.
 
 *Default:* ``off``
+
+.. _xdp_ring-size:
+
+ring-size
+---------
+
+Size of RX, FQ, TX, and CQ rings.
+
+Change of this parameter requires restart of the Knot server to take effect.
+
+.. NOTE::
+   This value should be at least as high as the configured RX size of the
+   network device in the XDP mode.
+
+*Default:* ``2048``
+
+.. _xdp_busypoll-budget:
+
+busypoll-budget
+---------------
+
+If set to a positive value, preferred busy polling is enabled with the
+specified budget.
+
+Change of this parameter requires restart of the Knot server to take effect.
+
+.. NOTE::
+
+   Preferred busy polling also requires setting ``napi_defer_hard_irqs`` and
+   ``gro_flush_timeout`` for the appropriate network interface. E.g.::
+
+     echo 2 | sudo tee /sys/class/net/<interface>/napi_defer_hard_irqs
+     echo 200000 | sudo tee /sys/class/net/<interface>/gro_flush_timeout
+
+.. NOTE::
+
+   A recommended value is between 8 and 64.
+
+*Default:* ``0`` (disabled)
+
+.. _xdp_busypoll-timeout:
+
+busypoll-timeout
+----------------
+
+Timeout in microseconds of preferrred busy polling if enabled by
+:ref:`xdp_busypoll-budget`.
+
+Change of this parameter requires restart of the Knot server to take effect.
+
+*Default:* ``20`` (20 microseconds)
 
 .. _control section:
 
@@ -1378,6 +1439,7 @@ transfer, target for a notification, etc.).
      address: ADDR[@INT] | STR ...
      via: ADDR[@INT] ...
      quic: BOOL
+     tls: BOOL
      key: key_id
      cert-key: BASE64 ...
      block-notify-after-transfer: BOOL
@@ -1456,6 +1518,16 @@ with this remote.
    does not take effect for QUIC. However, fast QUIC handshakes utilizing obtained
    session tickets are used for reopening connections to recently (up to 1 day)
    queried remotes.
+
+*Default:* ``off``
+
+.. _remote_tls:
+
+tls
+---
+
+If this option is set, the TLS (DoT) protocol will be used for outgoing communication
+with this remote.
 
 *Default:* ``off``
 
@@ -1669,7 +1741,9 @@ Possible values:
 deny
 ----
 
-If enabled, instead of allowing, deny the matching combination of the specified items.
+If enabled, instead of allowing, deny the specified :ref:`action<acl_action>`,
+:ref:`address<acl_address>`, :ref:`key<acl_key>`, or combination if these
+items. If no action is specified, deny all actions.
 
 *Default:* ``off``
 
@@ -1953,8 +2027,6 @@ Possible values:
 - ``ed448``
 
 .. NOTE::
-   Ed25519 algorithm is only available if compiled with GnuTLS 3.6.0+.
-
    Ed448 algorithm is only available if compiled with GnuTLS 3.6.12+ and Nettle 3.6+.
 
 *Default:* ``ecdsap256sha256``
@@ -2131,6 +2203,10 @@ will be refreshed, in order to prevent expired RRSIGs on secondary servers or
 resolvers' caches.
 
 *Default:* 0.1 * :ref:`policy_rrsig-lifetime` + :ref:`policy_propagation-delay` + :ref:`policy_zone-max-ttl`
+
+If :ref:`zone_dnssec-validation` is enabled:
+
+*Default:* ``1d`` (1 day)
 
 .. _policy_rrsig-pre-refresh:
 
@@ -2845,7 +2921,9 @@ List of DNSSEC checks:
 
 The validation is not affected by :ref:`zone_dnssec-policy` configuration,
 except for :ref:`policy_signing-threads` option, which specifies the number
-of threads for parallel validation.
+of threads for parallel validation, and :ref:`policy_rrsig-refresh`, which
+defines minimal allowed remaining RRSIG validity (otherwise a warning is
+logged).
 
 .. NOTE::
 

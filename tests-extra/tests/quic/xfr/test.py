@@ -5,6 +5,7 @@
 from dnstest.test import Test
 from dnstest.utils import *
 import random
+import subprocess
 
 t = Test(quic=True, tsig=True) # TSIG needed to skip weaker ACL rules
 
@@ -40,7 +41,7 @@ def check_error(server, msg):
         if server.log_search(msg):
             return
         t.sleep(1)
-    detail_log("Failed log expected")
+    detail_log("Failed log expected '%s' server %s" % (msg, server.name))
     set_err("MISSING ERROR LOG")
 
 def upd_check_zones(master, slave, zones, prev_serials):
@@ -50,52 +51,59 @@ def upd_check_zones(master, slave, zones, prev_serials):
     t.xfr_diff(master, slave, zones, prev_serials)
     return serials
 
+master.check_quic()
+
+t.start()
+
+tcpdump_pcap = t.out_dir + "/traffic.pcap"
+tcpdump_fout = t.out_dir + "/tcpdump.out"
+tcpdump_ferr = t.out_dir + "/tcpdump.err"
+
+tcpdump_proc = subprocess.Popen(["tcpdump", "-i", "lo", "-w", tcpdump_pcap,
+                                 "port", str(master.quic_port), "or", "port", str(slave.quic_port)],
+                                stdout=open(tcpdump_fout, mode="a"), stderr=open(tcpdump_ferr, mode="a"))
+
 try:
-    t.start()
-except Failed as e:
-    stderr = t.out_dir + "/" + str(e).split("'")[1] + "/stderr"
-    with open(stderr) as fstderr:
-        if "QUIC" in fstderr.readline():
-            raise Skip("QUIC support not compiled in")
-    raise e
+    # Check initial AXFR without cert-key-based authentication
+    serials = master.zones_wait(zones)
+    slave.zones_wait(zones, serials, equal=True, greater=False)
+    if slave.log_search(MSG_TSIG_ERROR):
+        set_err("INCOMPLETE TRANSFER")
+    t.xfr_diff(master, slave, zones)
 
-# Check initial AXFR without cert-key-based authentication
-serials = master.zones_wait(zones)
-slave.zones_wait(zones, serials, equal=True, greater=False)
-if slave.log_search(MSG_TSIG_ERROR):
-    set_err("INCOMPLETE TRANSFER")
-t.xfr_diff(master, slave, zones)
+    # Check master not authenticated due to bad cert-key
+    master.cert_key = "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXoxMjM0NTY="
+    slave.gen_confile()
+    slave.reload()
+    master.ctl("zone-notify")
+    check_error(master, MSG_RMT_NOTAUTH)
+    check_error(slave, MSG_DENIED_NOTIFY)
+    slave.ctl("zone-retransfer")
+    check_error(slave, MSG_RMT_BADCERT)
 
-# Check master not authenticated due to bad cert-key
-master.cert_key = "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXoxMjM0NTY="
-slave.gen_confile()
-slave.reload()
-master.ctl("zone-notify")
-check_error(master, MSG_RMT_NOTAUTH)
-check_error(slave, MSG_DENIED_NOTIFY)
-slave.ctl("zone-retransfer")
-check_error(slave, MSG_RMT_BADCERT)
+    # Check IXFR with cert-key-based authenticated master
+    master.fill_cert_key()
+    slave.gen_confile()
+    slave.reload()
+    serials = upd_check_zones(master, slave, rnd_zones, serials)
 
-# Check IXFR with cert-key-based authenticated master
-master.fill_cert_key()
-slave.gen_confile()
-slave.reload()
-serials = upd_check_zones(master, slave, rnd_zones, serials)
+    # Check slave not authenticated due to bad cert-key
+    slave.cert_key = "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXoxMjM0NTY="
+    master.gen_confile()
+    master.reload()
+    master.ctl("zone-notify")
+    check_error(master, MSG_RMT_BADCERT)
+    slave.ctl("zone-retransfer")
+    check_error(slave, MSG_RMT_NOTAUTH)
+    check_error(master, MSG_DENIED_TRANSFER)
 
-# Check slave not authenticated due to bad cert-key
-slave.cert_key = "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXoxMjM0NTY="
-master.gen_confile()
-master.reload()
-master.ctl("zone-notify")
-check_error(master, MSG_RMT_BADCERT)
-slave.ctl("zone-retransfer")
-check_error(slave, MSG_RMT_NOTAUTH)
-check_error(master, MSG_DENIED_TRANSFER)
+    # Check IXFR with cert-key-based authenticated slave
+    slave.fill_cert_key()
+    master.gen_confile()
+    master.reload()
+    serials = upd_check_zones(master, slave, rnd_zones, serials)
 
-# Check IXFR with cert-key-based authenticated slave
-slave.fill_cert_key()
-master.gen_confile()
-master.reload()
-serials = upd_check_zones(master, slave, rnd_zones, serials)
+finally:
+    tcpdump_proc.terminate()
 
 t.end()

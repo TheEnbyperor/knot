@@ -343,11 +343,10 @@ int main(int argc, char *argv[])
 		{ "tsig",     required_argument, NULL, 't' },
 		{ "extended", no_argument,       NULL, 'e' },
 		{ "list",     no_argument,       NULL, 'l' },
-		{ "brief",    no_argument,       NULL, 'b' }, // Legacy.
 		{ "mono",     no_argument,       NULL, 'x' },
 		{ "color",    no_argument,       NULL, 'X' },
 		{ "help",     no_argument,       NULL, 'h' },
-		{ "version",  no_argument,       NULL, 'V' },
+		{ "version",  optional_argument, NULL, 'V' },
 		{ "json",     no_argument,       NULL, 'j' },
 		{ NULL }
 	};
@@ -368,7 +367,7 @@ int main(int argc, char *argv[])
 	list_params.color = isatty(STDOUT_FILENO);
 
 	int opt = 0, parm = 0;
-	while ((opt = getopt_long(argc, argv, "c:C:D:t:ejlbxXhV", opts, NULL)) != -1) {
+	while ((opt = getopt_long(argc, argv, "c:C:D:t:ejlxXhV::", opts, NULL)) != -1) {
 		switch (opt) {
 		case 'c':
 			if (util_conf_init_file(optarg) != KNOT_EOK) {
@@ -404,9 +403,6 @@ int main(int argc, char *argv[])
 		case 'l':
 			just_list = true;
 			break;
-		case 'b':
-			WARN2("option '--brief' is deprecated and enabled by default");
-			break;
 		case 'x':
 			list_params.color = false;
 			break;
@@ -417,7 +413,7 @@ int main(int argc, char *argv[])
 			print_help();
 			goto success;
 		case 'V':
-			print_version(PROGRAM_NAME);
+			print_version(PROGRAM_NAME, optarg != NULL);
 			goto success;
 		default:
 			print_help();

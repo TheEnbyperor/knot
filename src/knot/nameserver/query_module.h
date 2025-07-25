@@ -1,4 +1,4 @@
-/*  Copyright (C) 2020 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2024 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -22,24 +22,27 @@
 #include "knot/dnssec/zone-keys.h"
 #include "knot/include/module.h"
 #include "knot/server/server.h"
+#include "contrib/atomic.h"
 #include "contrib/ucw/lists.h"
 
-#ifdef HAVE_ATOMIC
- #define ATOMIC_GET(src) __atomic_load_n(&(src), __ATOMIC_RELAXED)
-#else
- #define ATOMIC_GET(src) (src)
-#endif
+#define KNOTD_STAGES (KNOTD_STAGE_PROTO_END + 1)
 
-#define KNOTD_STAGES (KNOTD_STAGE_END + 1)
+typedef enum {
+	QUERY_HOOK_TYPE_PROTO,
+	QUERY_HOOK_TYPE_GENERAL,
+	QUERY_HOOK_TYPE_IN,
+} query_hook_type_t;
 
-typedef unsigned (*query_step_process_f)
-	(unsigned state, knot_pkt_t *pkt, knotd_qdata_t *qdata, knotd_mod_t *mod);
-
-/*! \brief Single processing step in query processing. */
+/*! \brief Single processing step in query/module processing. */
 struct query_step {
 	node_t node;
+	query_hook_type_t type;
+	union {
+		knotd_mod_proto_hook_f proto_hook;
+		knotd_mod_hook_f general_hook;
+		knotd_mod_in_hook_f in_hook;
+	};
 	void *ctx;
-	query_step_process_f process;
 };
 
 /*! Query plan represents a sequence of steps needed for query processing
@@ -58,7 +61,7 @@ void query_plan_free(struct query_plan *plan);
 
 /*! \brief Plan another step for given stage. */
 int query_plan_step(struct query_plan *plan, knotd_stage_t stage,
-                    query_step_process_f process, void *ctx);
+                    query_hook_type_t type, void *hook, void *ctx);
 
 /*! \brief Open query module identified by name. */
 knotd_mod_t *query_module_open(conf_t *conf, server_t *server, conf_mod_id_t *mod_id,
@@ -91,7 +94,7 @@ struct knotd_mod {
 	zone_keyset_t *keyset;
 	zone_sign_ctx_t *sign_ctx;
 	mod_ctr_t *stats_info;
-	uint64_t **stats_vals;
+	knot_atomic_uint64_t **stats_vals;
 	uint32_t stats_count;
 	void *ctx;
 };

@@ -279,6 +279,7 @@ build:archive:
     - cd _build
     - ../configure
     - make distcheck V=1 DISTCHECK_CONFIGURE_FLAGS="--disable-static" -j2
+    - make html singlehtml
   only:
     - master
     - tags
@@ -288,6 +289,22 @@ build:archive:
   artifacts:
     paths:
       - _build/*.tar.xz
+      - _build/doc/_build/html
+      - _build/doc/_build/singlehtml
+
+pages:
+  stage: documentation
+  needs:
+    - build:archive
+  script:
+    - mkdir -p public/master
+    - mv _build/doc/_build/html public/master/html
+    - mv _build/doc/_build/singlehtml public/master/singlehtml
+  only:
+    - master
+  artifacts:
+    paths:
+      - public
 
 build:documentation:
   <<: *debian_stable
@@ -366,10 +383,6 @@ pkg:debian-11:
   <<: *pkg_test_deb
   image: $CI_REGISTRY/packaging/apkg/test/debian-11
 
-pkg:debian-10:
-  <<: *pkg_test_deb
-  image: $CI_REGISTRY/packaging/apkg/test/debian-10
-
 pkg:ubuntu-24.04:
   <<: *pkg_test_deb
   image: $CI_REGISTRY/packaging/apkg/test/ubuntu-24.04
@@ -382,13 +395,9 @@ pkg:ubuntu-20.04:
   <<: *pkg_test_deb
   image: $CI_REGISTRY/packaging/apkg/test/ubuntu-20.04
 
-pkg:ubuntu-18.04:
-  <<: *pkg_test_deb
-  image: $CI_REGISTRY/packaging/apkg/test/ubuntu-18.04
-
-pkg:fedora-41:
+pkg:fedora-39:
   <<: *pkg_test
-  image: $CI_REGISTRY/packaging/apkg/test/fedora-41
+  image: $CI_REGISTRY/packaging/apkg/test/fedora-39
 
 pkg:fedora-40:
   <<: *pkg_test

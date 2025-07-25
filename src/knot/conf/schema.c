@@ -64,9 +64,7 @@ static const knot_lookup_t dnssec_key_algs[] = {
 	{ DNSSEC_KEY_ALGORITHM_RSA_SHA512,        "rsasha512" },
 	{ DNSSEC_KEY_ALGORITHM_ECDSA_P256_SHA256, "ecdsap256sha256" },
 	{ DNSSEC_KEY_ALGORITHM_ECDSA_P384_SHA384, "ecdsap384sha384" },
-#ifdef HAVE_ED25519
 	{ DNSSEC_KEY_ALGORITHM_ED25519,           "ed25519" },
-#endif
 #ifdef HAVE_ED448
 	{ DNSSEC_KEY_ALGORITHM_ED448,             "ed448" },
 #endif
@@ -249,15 +247,8 @@ static const yp_item_t desc_server[] = {
 	{ C_DBUS_INIT_DELAY,      YP_TINT,  YP_VINT = { 0, INT32_MAX, 1, YP_STIME } },
 	{ C_LISTEN,               YP_TADDR, YP_VADDR = { 53 }, YP_FMULTI, { check_listen } },
 	{ C_LISTEN_QUIC,          YP_TADDR, YP_VADDR = { 853 }, YP_FMULTI, { check_listen } },
+	{ C_LISTEN_TLS,           YP_TADDR, YP_VADDR = { 853 }, YP_FMULTI, { check_listen } },
 	{ C_COMMENT,              YP_TSTR,  YP_VNONE },
-	// Legacy items.
-	{ C_LISTEN_XDP,           YP_TADDR, YP_VADDR = { 0 },                        YP_FMULTI, { legacy_item } },
-	{ C_MAX_TCP_CLIENTS,      YP_TINT,  YP_VINT = { 0, INT32_MAX, 0 },           YP_FNONE,  { legacy_item } },
-	{ C_TCP_HSHAKE_TIMEOUT,   YP_TINT,  YP_VINT = { 0, INT32_MAX, 0, YP_STIME }, YP_FNONE,  { legacy_item } },
-	{ C_TCP_REPLY_TIMEOUT,    YP_TINT,  YP_VINT = { 0, INT32_MAX, 0, YP_STIME }, YP_FNONE,  { legacy_item } },
-	{ C_MAX_UDP_PAYLOAD,      YP_TINT,  YP_VINT = { 0, INT32_MAX, 0, YP_SSIZE }, YP_FNONE,  { legacy_item } },
-	{ C_MAX_IPV4_UDP_PAYLOAD, YP_TINT,  YP_VINT = { 0, INT32_MAX, 0, YP_SSIZE }, YP_FNONE,  { legacy_item } },
-	{ C_MAX_IPV6_UDP_PAYLOAD, YP_TINT,  YP_VINT = { 0, INT32_MAX, 0, YP_SSIZE }, YP_FNONE,  { legacy_item } },
 	{ NULL }
 };
 
@@ -274,10 +265,10 @@ static const yp_item_t desc_xdp[] = {
 	{ C_TCP_IDLE_RESET,       YP_TINT,  YP_VINT = { 1, INT32_MAX, 20, YP_STIME } },
 	{ C_TCP_RESEND,           YP_TINT,  YP_VINT = { 1, INT32_MAX, 5, YP_STIME } },
 	{ C_ROUTE_CHECK,          YP_TBOOL, YP_VNONE },
-	{ C_EXTRA_FRAMES,         YP_TBOOL, YP_VNONE },
+	{ C_RING_SIZE,            YP_TINT,  YP_VINT = { 4, 32768, 2048 } },
+	{ C_BUSYPOLL_BUDGET,      YP_TINT,  YP_VINT = { 0, UINT16_MAX, 0 } },
+	{ C_BUSYPOLL_TIMEOUT,     YP_TINT,  YP_VINT = { 1, UINT16_MAX, 20 } },
 	{ C_COMMENT,              YP_TSTR,  YP_VNONE },
-	// Legacy items.
-	{ C_QUIC_LOG,             YP_TBOOL, YP_VNONE, YP_FNONE, { legacy_item } },
 	{ NULL }
 };
 
@@ -350,6 +341,7 @@ static const yp_item_t desc_remote[] = {
 	{ C_ADDR,             YP_TADDR, YP_VADDR = { 53, 853 }, YP_FMULTI },
 	{ C_VIA,              YP_TADDR, YP_VNONE, YP_FMULTI },
 	{ C_QUIC,             YP_TBOOL, YP_VNONE },
+	{ C_TLS,              YP_TBOOL, YP_VNONE },
 	{ C_KEY,              YP_TREF,  YP_VREF = { C_KEY }, YP_FNONE, { check_ref } },
 	{ C_CERT_KEY,         YP_TB64,  YP_VNONE, YP_FMULTI, { check_cert_pin } },
 	{ C_BLOCK_NOTIFY_XFR, YP_TBOOL, YP_VNONE },
@@ -432,7 +424,7 @@ static const yp_item_t desc_policy[] = {
 	                                   CONF_IO_FRLD_ZONES },
 	{ C_RRSIG_REFRESH,       YP_TINT,  YP_VINT = { 1, INT32_MAX, YP_NIL, YP_STIME },
 	                                   CONF_IO_FRLD_ZONES },
-	{ C_RRSIG_PREREFRESH,    YP_TINT,  YP_VINT = { 0, INT32_MAX, HOURS(1), YP_STIME },
+	{ C_RRSIG_PREREFRESH,    YP_TINT,  YP_VINT = { 0, INT32_MAX, HOURS(1), YP_STIME, DAYS(1) },
 	                                   CONF_IO_FRLD_ZONES },
 	{ C_REPRO_SIGNING,       YP_TBOOL, YP_VNONE, CONF_IO_FRLD_ZONES },
 	{ C_NSEC3,               YP_TBOOL, YP_VNONE, CONF_IO_FRLD_ZONES },
@@ -506,27 +498,12 @@ static const yp_item_t desc_policy[] = {
 	{ C_MODULE,              YP_TDATA, YP_VDATA = { 0, NULL, mod_id_to_bin, mod_id_to_txt }, \
 	                                   YP_FMULTI | FLAGS, { check_modref } }, \
 	{ C_COMMENT,             YP_TSTR,  YP_VNONE }, \
-	/* Legacy items.*/ \
-	{ C_DISABLE_ANY,         YP_TBOOL, YP_VNONE,                                YP_FNONE, { legacy_item } }, \
-	{ C_MAX_ZONE_SIZE,       YP_TINT,  YP_VINT = { 0, SSIZE_MAX, 0, YP_SSIZE }, YP_FNONE, { legacy_item } }, \
-	{ C_MAX_JOURNAL_USAGE,   YP_TINT,  YP_VINT = { 0, SSIZE_MAX, 0, YP_SSIZE }, YP_FNONE, { legacy_item } }, \
-	{ C_MAX_JOURNAL_DEPTH,   YP_TINT,  YP_VINT = { 0, SSIZE_MAX, 0 },           YP_FNONE, { legacy_item } }, \
-	{ C_MAX_REFRESH_INTERVAL,YP_TINT,  YP_VINT = { 0, SSIZE_MAX, 0, YP_STIME }, YP_FNONE, { legacy_item } }, \
-	{ C_MIN_REFRESH_INTERVAL,YP_TINT,  YP_VINT = { 0, SSIZE_MAX, 0, YP_STIME }, YP_FNONE, { legacy_item } }, \
 
 static const yp_item_t desc_template[] = {
 	{ C_ID,                  YP_TSTR,  YP_VNONE, CONF_IO_FREF },
 	{ C_GLOBAL_MODULE,       YP_TDATA, YP_VDATA = { 0, NULL, mod_id_to_bin, mod_id_to_txt },
 	                                   YP_FMULTI | CONF_IO_FRLD_MOD, { check_modref } },
 	ZONE_ITEMS(CONF_IO_FRLD_ZONES)
-	// Legacy items.
-	{ C_TIMER_DB,            YP_TSTR,  YP_VSTR = { "" },                        YP_FNONE, { legacy_item } },
-	{ C_MAX_TIMER_DB_SIZE,   YP_TINT,  YP_VINT = { 0, SSIZE_MAX, 0, YP_SSIZE }, YP_FNONE, { legacy_item } },
-	{ C_JOURNAL_DB,          YP_TSTR,  YP_VSTR = { "" },                        YP_FNONE, { legacy_item } },
-	{ C_JOURNAL_DB_MODE,     YP_TOPT,  YP_VOPT = { journal_modes, 0 },          YP_FNONE, { legacy_item } },
-	{ C_MAX_JOURNAL_DB_SIZE, YP_TINT,  YP_VINT = { 0, SSIZE_MAX, 0, YP_SSIZE }, YP_FNONE, { legacy_item } },
-	{ C_KASP_DB,             YP_TSTR,  YP_VSTR = { "" },                        YP_FNONE, { legacy_item } },
-	{ C_MAX_KASP_DB_SIZE,    YP_TINT,  YP_VINT = { 0, SSIZE_MAX, 0, YP_SSIZE }, YP_FNONE, { legacy_item } },
 	{ NULL }
 };
 

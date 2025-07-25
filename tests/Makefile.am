@@ -14,7 +14,8 @@ if HAVE_DAEMON
 LDADD += \
 	$(top_builddir)/src/libknotd.la		\
 	$(liburcu_LIBS)				\
-	$(systemd_LIBS)
+	$(systemd_LIBS)				\
+	$(libdbus_LIBS)
 endif HAVE_DAEMON
 
 LDADD += \
@@ -47,6 +48,7 @@ libtap_la_SOURCES = \
 EXTRA_PROGRAMS = tap/runtests
 
 check_PROGRAMS = \
+	contrib/test_atomic			\
 	contrib/test_base32hex			\
 	contrib/test_base64			\
 	contrib/test_base64url			\

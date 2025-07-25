@@ -1,4 +1,4 @@
-/*  Copyright (C) 2018 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2023 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -104,20 +104,16 @@ static size_t ecdsa_curve_point_size(gnutls_ecc_curve_t curve)
 	}
 }
 
-#if defined(HAVE_ED25519) || defined(HAVE_ED448)
 static size_t eddsa_curve_point_size(gnutls_ecc_curve_t curve)
 {
 	switch (curve) {
-#ifdef HAVE_ED25519
 	case GNUTLS_ECC_CURVE_ED25519: return 32;
-#endif
 #ifdef HAVE_ED448
 	case GNUTLS_ECC_CURVE_ED448: return 57;
 #endif
 	default: return 0;
 	}
 }
-#endif
 
 /*!
  * Convert ECDSA public key to DNSSEC format.
@@ -157,7 +153,6 @@ static int ecdsa_pubkey_to_rdata(gnutls_pubkey_t key, dnssec_binary_t *rdata)
 /*!
  * Convert EDDSA public key to DNSSEC format.
  */
-#if defined(HAVE_ED25519) || defined(HAVE_ED448)
 static int eddsa_pubkey_to_rdata(gnutls_pubkey_t key, dnssec_binary_t *rdata)
 {
 	assert(key);
@@ -187,7 +182,6 @@ static int eddsa_pubkey_to_rdata(gnutls_pubkey_t key, dnssec_binary_t *rdata)
 
 	return DNSSEC_EOK;
 }
-#endif
 
 /* -- crypto to DNSSEC ------------------------------------------------------*/
 
@@ -248,20 +242,16 @@ static gnutls_ecc_curve_t ecdsa_curve_from_rdata_size(size_t rdata_size)
 /*!
  * Get EDDSA curve based on DNSKEY RDATA size.
  */
-#if defined(HAVE_ED25519) || defined(HAVE_ED448)
 static gnutls_ecc_curve_t eddsa_curve_from_rdata_size(size_t rdata_size)
 {
 	switch (rdata_size) {
-#ifdef HAVE_ED25519
 	case 32: return GNUTLS_ECC_CURVE_ED25519;
-#endif
 #ifdef HAVE_ED448
 	case 57: return GNUTLS_ECC_CURVE_ED448;
 #endif
 	default: return GNUTLS_ECC_CURVE_INVALID;
 	}
 }
-#endif
 
 /*!
  * Convert ECDSA key in DNSSEC format to crypto key.
@@ -296,7 +286,6 @@ static int ecdsa_rdata_to_pubkey(const dnssec_binary_t *rdata, gnutls_pubkey_t k
 /*!
  * Convert EDDSA key in DNSSEC format to crypto key.
  */
-#if defined(HAVE_ED25519) || defined(HAVE_ED448)
 static int eddsa_rdata_to_pubkey(const dnssec_binary_t *rdata, gnutls_pubkey_t key)
 {
 	assert(rdata);
@@ -320,7 +309,6 @@ static int eddsa_rdata_to_pubkey(const dnssec_binary_t *rdata, gnutls_pubkey_t k
 
 	return DNSSEC_EOK;
 }
-#endif
 
 /* -- internal API --------------------------------------------------------- */
 
@@ -339,10 +327,8 @@ int convert_pubkey_to_dnskey(gnutls_pubkey_t key, dnssec_binary_t *rdata)
 
 	switch ((gnutls_pk_algorithm_t)algorithm) {
 	case GNUTLS_PK_RSA: return rsa_pubkey_to_rdata(key, rdata);
-	case GNUTLS_PK_EC:  return ecdsa_pubkey_to_rdata(key, rdata);
-#ifdef HAVE_ED25519
+	case GNUTLS_PK_ECDSA: return ecdsa_pubkey_to_rdata(key, rdata);
 	case GNUTLS_PK_EDDSA_ED25519: return eddsa_pubkey_to_rdata(key, rdata);
-#endif
 #ifdef HAVE_ED448
 	case GNUTLS_PK_EDDSA_ED448: return eddsa_pubkey_to_rdata(key, rdata);
 #endif
@@ -363,10 +349,8 @@ int convert_dnskey_to_pubkey(uint8_t algorithm, const dnssec_binary_t *rdata,
 
 	switch(gnutls_alg) {
 	case GNUTLS_PK_RSA: return rsa_rdata_to_pubkey(rdata, key);
-	case GNUTLS_PK_EC:  return ecdsa_rdata_to_pubkey(rdata, key);
-#ifdef HAVE_ED25519
+	case GNUTLS_PK_ECDSA: return ecdsa_rdata_to_pubkey(rdata, key);
 	case GNUTLS_PK_EDDSA_ED25519: return eddsa_rdata_to_pubkey(rdata, key);
-#endif
 #ifdef HAVE_ED448
 	case GNUTLS_PK_EDDSA_ED448: return eddsa_rdata_to_pubkey(rdata, key);
 #endif

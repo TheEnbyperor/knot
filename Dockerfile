@@ -10,7 +10,7 @@ ENV BUILD_PKGS \
     libedit-dev \
     libfstrm-dev \
     libgnutls28-dev \
-    libidn2-0-dev \
+    libidn2-dev \
     liblmdb-dev \
     libmaxminddb-dev \
     libmnl-dev \
@@ -35,7 +35,7 @@ COPY . /knot-src
 WORKDIR /knot-src
 ARG FASTPARSER=disable
 RUN autoreconf -if && \
-    CFLAGS="-g -O2 -DNDEBUG -D_FORTIFY_SOURCE=2 -fstack-protector-strong" \
+    CFLAGS="-g -O2 -DNDEBUG -D_FORTIFY_SOURCE=3 -fstack-protector-strong" \
     ./configure --prefix=/ \
                 --with-rundir=/rundir \
                 --with-storage=/storage \
@@ -91,7 +91,11 @@ COPY --from=builder /tmp/knot-install/config/  /config/
 COPY --from=builder /tmp/knot-install/include/ /include/
 COPY --from=builder /tmp/knot-install/lib/     /lib/
 COPY --from=builder /tmp/knot-install/sbin/    /sbin/
-COPY --from=builder /tmp/knot-install/share/   /share/
+
+# Prepare configurations for optional D-Bus signaling
+COPY --from=builder /knot-src/distro/common/system-local.conf /etc/dbus-1/
+COPY --from=builder /knot-src/distro/common/cz.nic.knotd.conf /usr/share/dbus-1/system.d/
+RUN mkdir -p /run/dbus
 
 # Prepare configurations for optional D-Bus signaling
 COPY --from=builder /knot-src/distro/common/system-local.conf /etc/dbus-1/

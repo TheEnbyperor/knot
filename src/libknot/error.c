@@ -109,6 +109,7 @@ static const struct error errors[] = {
 	{ KNOT_EBADCERTKEY,  "unknown certificate key" },
 	{ KNOT_EFACCES,      "file permission denied" },
 	{ KNOT_EBACKUPDATA,  "requested data not in backup" },
+	{ KNOT_ECPUCOMPAT,   "incompatible CPU architecture" },
 
 	{ KNOT_GENERAL_ERROR, "unknown general error" },
 
@@ -120,6 +121,7 @@ static const struct error errors[] = {
 	{ KNOT_NET_EADDR,    "bad address or host name" },
 	{ KNOT_NET_ESOCKET,  "can't create socket" },
 	{ KNOT_NET_ECONNECT, "can't connect" },
+	{ KNOT_NET_EHSHAKE,  "handshake failed" },
 	{ KNOT_NET_ESEND,    "can't send data" },
 	{ KNOT_NET_ERECV,    "can't receive data" },
 	{ KNOT_NET_ETIMEOUT, "network timeout" },
@@ -175,6 +177,7 @@ static const struct error errors[] = {
 	{ KNOT_NO_PUBLIC_KEY,         "no public key" },
 	{ KNOT_NO_PRIVATE_KEY,        "no private key" },
 	{ KNOT_NO_READY_KEY,          "no key ready for submission" },
+	{ KNOT_ESOON_EXPIRE,          "oncoming RRSIG expiration" },
 	{ KNOT_DNSSEC_EKEYTAG_LIMIT,  "many keys with equal keytag" },
 	{ KNOT_DNSSEC_EXTRA_NSEC,     "superfluous NSEC(3)" },
 

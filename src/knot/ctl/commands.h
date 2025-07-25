@@ -1,4 +1,4 @@
-/*  Copyright (C) 2023 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2024 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -87,6 +87,7 @@ typedef enum {
 	CTL_ZONE_BACKUP,
 	CTL_ZONE_RESTORE,
 	CTL_ZONE_SIGN,
+	CTL_ZONE_VALIDATE,
 	CTL_ZONE_KEYS_LOAD,
 	CTL_ZONE_KEY_ROLL,
 	CTL_ZONE_KSK_SBM,
@@ -124,6 +125,7 @@ typedef struct {
 	knot_ctl_data_t data;
 	server_t *server;
 	bool suppress;	// Suppress error reporting in the "all zones" ctl commands.
+	unsigned thread_idx;
 } ctl_args_t;
 
 /*!

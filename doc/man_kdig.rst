@@ -111,7 +111,8 @@ Options
   An explicit *query_type* specification. See possible values above.
 
 **-V**, **--version**
-  Print the program version.
+  Print the program version. The option **-VV** makes the program
+  print the compile time configuration summary.
 
 **-x** *address*
   Send a reverse (PTR) query for IPv4 or IPv6 *address*. The correct name, class
@@ -281,7 +282,7 @@ Options
   Request the nameserver identifier (NSID).
 
 **+**\ [\ **no**\ ]\ **bufsize**\ =\ *B*
-  Set EDNS buffer size in bytes (default is 4096 bytes).
+  Set EDNS buffer size in bytes (default is 1232 bytes).
 
 **+**\ [\ **no**\ ]\ **padding**\[\ =\ *B*\]
   Use EDNS(0) padding option to pad queries, optionally to a specific
@@ -298,7 +299,7 @@ Options
   Set EDNS(0) client subnet SUBN=addr/prefix.
 
 **+**\ [\ **no**\ ]\ **edns**\[\ =\ *N*\]
-  Use EDNS version (default is 0).
+  Use EDNS version (default is 0). EDNS(0) is enabled by default.
 
 **+**\ [\ **no**\ ]\ **timeout**\ =\ *T*
   Set the wait-for-reply interval in seconds (default is 5 seconds). This timeout
@@ -333,7 +334,7 @@ Options
 
 **+noidn**
   Disable the IDN transformation to ASCII and vice versa. IDN support depends
-  on libidn availability during project building! If used in *common-settings*,
+  on libidn2 availability during project building! If used in *common-settings*,
   all IDN transformations are disabled. If used in the individual query *settings*,
   transformation from ASCII is disabled on output for the particular query. Note
   that IDN transformation does not preserve domain name letter case.

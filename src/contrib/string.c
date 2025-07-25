@@ -1,4 +1,4 @@
-/*  Copyright (C) 2021 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2023 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -26,15 +26,15 @@
   /* #include <string.h> is needed. */
 #elif defined(HAVE_EXPLICIT_MEMSET)
   /* #include <string.h> is needed. */
-#elif defined(HAVE_GNUTLS_MEMSET)
-  #include <gnutls/gnutls.h>
 #else
-  #define USE_CUSTOM_MEMSET
+  #include <gnutls/gnutls.h>
 #endif
 
 #include "contrib/string.h"
 #include "contrib/ctype.h"
 #include "contrib/tolower.h"
+
+const char *configure_summary = CONFIGURE_SUMMARY;
 
 uint8_t *memdup(const uint8_t *data, size_t data_size)
 {
@@ -137,11 +137,6 @@ int const_time_memcmp(const void *s1, const void *s2, size_t n)
 	return equal;
 }
 
-#if defined(USE_CUSTOM_MEMSET)
-typedef void *(*memset_t)(void *, int, size_t);
-static volatile memset_t volatile_memset = memset;
-#endif
-
 void *memzero(void *s, size_t n)
 {
 #if defined(HAVE_EXPLICIT_BZERO)	/* In OpenBSD since 5.5. */
@@ -161,14 +156,9 @@ void *memzero(void *s, size_t n)
 	return s;
 #elif defined(HAVE_EXPLICIT_MEMSET)	/* In NetBSD since 7.0. */
 	return explicit_memset(s, 0, n);
-#elif defined(HAVE_GNUTLS_MEMSET)	/* In GnuTLS since 3.4.0. */
+#else
 	gnutls_memset(s, 0, n);
 	return s;
-#else					/* Knot custom solution as a fallback. */
-	/* Warning: the use of the return value is *probably* needed
-	 * so as to avoid the volatile_memset() to be optimized out.
-	 */
-	return volatile_memset(s, 0, n);
 #endif
 }
 

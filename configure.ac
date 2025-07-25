@@ -1,8 +1,8 @@
 AC_PREREQ([2.69])
 
 m4_define([knot_VERSION_MAJOR], 3)dnl
-m4_define([knot_VERSION_MINOR], 3)dnl
-m4_define([knot_VERSION_PATCH], 10)dnl Leave empty if the master branch!
+m4_define([knot_VERSION_MINOR], 4)dnl
+m4_define([knot_VERSION_PATCH], 0)dnl Leave empty if the master branch!
 m4_include([m4/knot-version.m4])
 
 AC_INIT([knot], [knot_PKG_VERSION], [knot-dns@labs.nic.cz])
@@ -16,17 +16,13 @@ AC_CANONICAL_HOST
 
 # Update library versions
 # https://www.gnu.org/software/libtool/manual/html_node/Updating-version-info.html
-KNOT_LIB_VERSION([libknot],    14, 0, 0)
+KNOT_LIB_VERSION([libknot],    15, 0, 0)
 KNOT_LIB_VERSION([libdnssec],   9, 0, 0)
 KNOT_LIB_VERSION([libzscanner], 4, 0, 0)
 
 AC_SUBST([KNOT_VERSION_MAJOR], knot_VERSION_MAJOR)
 AC_SUBST([KNOT_VERSION_MINOR], knot_VERSION_MINOR)
 AC_SUBST([KNOT_VERSION_PATCH], knot_VERSION_PATCH)
-
-# Store ./configure parameters and CFLAGS
-AC_DEFINE_UNQUOTED([CONFIGURE_PARAMS],["$*"],[Params passed to configure])
-AC_DEFINE_UNQUOTED([CONFIGURE_CFLAGS],["$CFLAGS"],[Passed CFLAGS from environment])
 
 AC_CONFIG_FILES([src/libknot/version.h
                  src/libdnssec/version.h
@@ -119,14 +115,23 @@ AC_ARG_ENABLE([modules],
 AC_ARG_ENABLE([utilities],
     AS_HELP_STRING([--disable-utilities], [Don't build Knot DNS utilities]), [], [enable_utilities=yes])
 AM_CONDITIONAL([HAVE_UTILS], [test "$enable_utilities" = "yes"])
+AM_CONDITIONAL([HAVE_LIBUTILS], test "$enable_utilities" != "no" -o \
+                                     "$enable_daemon" != "no")
 
 # Build Knot DNS documentation
 AC_ARG_ENABLE([documentation],
     AS_HELP_STRING([--disable-documentation], [Don't build Knot DNS documentation]), [], [enable_documentation=yes])
+AS_IF([test "$enable_documentation" = "yes"], [
+  AC_PATH_PROG([SPHINXBUILD], [sphinx-build], [false])
+  AS_IF([test "$SPHINXBUILD" = "false"],
+    [AC_MSG_WARN([missing 'sphinx-build' executable for documentation generation])
+     enable_documentation=no]
+  )
+  AC_PATH_PROG([PDFLATEX], [pdflatex], [false])
+])
 AM_CONDITIONAL([HAVE_DOCS], [test "$enable_documentation" = "yes"])
+AM_CONDITIONAL([HAVE_PDFLATEX], test "$PDFLATEX" != "false")
 
-AM_CONDITIONAL([HAVE_LIBUTILS], test "$enable_utilities" != "no" -o \
-                                     "$enable_daemon" != "no")
 ######################
 # Generic dependencies
 ######################
@@ -138,7 +143,7 @@ AC_ARG_ENABLE([fastparser],
 AM_CONDITIONAL([FAST_PARSER], [test "$enable_fastparser" = "yes"])
 
 # GnuTLS crypto backend
-PKG_CHECK_MODULES([gnutls], [gnutls >= 3.3], [
+PKG_CHECK_MODULES([gnutls], [gnutls >= 3.6.10], [
     save_CFLAGS=$CFLAGS
     save_LIBS=$LIBS
     CFLAGS="$CFLAGS $gnutls_CFLAGS"
@@ -148,34 +153,11 @@ PKG_CHECK_MODULES([gnutls], [gnutls >= 3.3], [
     AS_IF([test "$enable_pkcs11" = yes],
         [AC_DEFINE([ENABLE_PKCS11], [1], [PKCS #11 support available])])
 
-    AC_CHECK_DECL([GNUTLS_PK_EDDSA_ED25519],
-        [AC_DEFINE([HAVE_ED25519], [1], [GnuTLS ED25519 support available])
-         enable_ed25519=yes],
-        [enable_ed25519=no],
-        [#include <gnutls/gnutls.h>])
-
     AC_CHECK_DECL([GNUTLS_SIGN_EDDSA_ED448],
         [AC_DEFINE([HAVE_ED448], [1], [GnuTLS ED448 support available])
          enable_ed448=yes],
         [enable_ed448=no],
         [#include <gnutls/gnutls.h>])
-
-    AC_CHECK_DECL([GNUTLS_PRIVKEY_FLAG_REPRODUCIBLE],
-        [AC_DEFINE([HAVE_GNUTLS_REPRODUCIBLE], [1], [GnuTLS reproducible signing available])
-         # Ensure the version is at least 3.6.10
-         AC_CHECK_FUNC([gnutls_aead_cipher_encryptv2], [enable_repro_signing=yes], [enable_repro_signing=no])],
-        [enable_repro_signing=no],
-        [#include <gnutls/abstract.h>])
-
-    AC_CHECK_FUNC([gnutls_privkey_sign_data2],
-        [AC_DEFINE([HAVE_SIGN_DATA2], [1], [gnutls_privkey_sign_data2 available])])
-
-    AC_CHECK_FUNC([gnutls_privkey_export_x509],
-        [AC_DEFINE([HAVE_EXPORT_X509], [1], [gnutls_privkey_export_x509 available])])
-
-    AC_CHECK_FUNC([gnutls_memset],
-        [AC_DEFINE([HAVE_GNUTLS_MEMSET], [1], [gnutls_memset available])
-         gnutls_memset=yes], [gnutls_memset=no])
 
     AC_CHECK_FUNC([gnutls_early_cipher_get],
         [AC_DEFINE([HAVE_GNUTLS_QUIC], [1], [gnutls_early_cipher_get available])
@@ -281,6 +263,10 @@ AC_ARG_ENABLE([systemd],
     AS_HELP_STRING([--enable-systemd=auto|yes|no], [enable systemd integration [default=auto]]),
     [enable_systemd="$enableval"], [enable_systemd=auto])
 
+AC_ARG_ENABLE([dbus],
+    AS_HELP_STRING([--enable-dbus=auto|systemd|libdbus|no], [enable D-bus support [default=auto]]),
+    [enable_dbus="$enableval"], [enable_dbus=auto])
+
 AS_IF([test "$enable_daemon" = "yes"],[
 
 AS_IF([test "$enable_systemd" != "no"],[
@@ -293,11 +279,28 @@ AS_IF([test "$enable_systemd" != "no"],[
     ])
 
 AS_IF([test "$enable_systemd" = "yes"],[
-  AC_DEFINE([ENABLE_SYSTEMD], [1], [Use systemd integration.])
-  AC_CHECK_HEADER([systemd/sd-bus.h],
-                  [AC_DEFINE([ENABLE_DBUS], [1], [systemd D-Bus available])],
-                  [enable_systemd="yes (without D-Bus)"])
-])
+  AC_DEFINE([ENABLE_SYSTEMD], [1], [Use systemd integration.])])
+
+AS_IF([test "$enable_dbus" != "no"],[
+  AS_CASE([$enable_dbus],
+    [auto],[AS_IF([test "$enable_systemd" = "yes"],
+             [AC_DEFINE([ENABLE_DBUS_SYSTEMD], [1], [systemd D-Bus available])
+              enable_dbus=systemd],
+             [PKG_CHECK_MODULES([libdbus], [dbus-1],
+               [AC_DEFINE([ENABLE_DBUS_LIBDBUS], [1], [libdbus D-Bus available])
+                enable_dbus=libdbus],
+               [enable_dbus=no])])],
+    [systemd],[AS_IF([test "$enable_systemd" = "yes"],
+                [AC_DEFINE([ENABLE_DBUS_SYSTEMD], [1], [systemd D-Bus available])
+                 enable_dbus=systemd],
+                [AC_MSG_ERROR([systemd >= 221 not available.])])],
+    [libdbus],[PKG_CHECK_MODULES([libdbus], [dbus-1],
+                [AC_DEFINE([ENABLE_DBUS_LIBDBUS], [1], [libdbus D-Bus available])
+                 enable_dbus=libdbus],
+                [AC_MSG_ERROR([libdbus not available.])])],
+    [no],[enable_dbus=no],
+    [*],[AC_MSG_ERROR([Invalid value of --enable-dbus.])])
+    ])
 
 ]) dnl enable_daemon
 
@@ -347,54 +350,10 @@ AC_ARG_WITH([memory-allocator],
 AS_IF([test "$with_memory_allocator" = ""], [with_memory_allocator="auto"])
 AC_SUBST([malloc_LIBS])
 
-dnl Check for userspace-rcu library
-AC_ARG_WITH(urcu,
-[  --with-urcu=DIR        where to find userspace-rcu library])
-
 AS_IF([test "$enable_daemon" = "yes"],[
 
-AS_IF([test "$with_urcu" != "no"], [
-  PKG_CHECK_MODULES([liburcu], liburcu, [
-    liburcu_PKGCONFIG="liburcu >= 0.4.0"
-    AC_SUBST([liburcu_PKGCONFIG])
-    with_urcu=yes
-  ],[
-    for try_urcu in "$with_urcu" "" "/usr/local"; do
-      save_LIBS="$LIBS"
-      save_CPPFLAGS="$CPPFLAGS"
-
-      AS_IF([test -d "$try_urcu"], [
-        liburcu_CFLAGS="-I$try_urcu/include"
-        liburcu_LIBS="-L$try_urcu/lib"
-      ],[
-        liburcu_CFLAGS=""
-        liburcu_LIBS=""
-      ])
-
-      CPPFLAGS="$CPPFLAGS $liburcu_CFLAGS"
-      LIBS="$LIBS $liburcu_LIBS"
-
-      AC_SEARCH_LIBS([rcu_set_pointer_sym], [urcu], [
-        with_urcu=yes
-        liburcu_LIBS="$liburcu_LIBS -lurcu"
-        AC_SUBST([liburcu_CFLAGS])
-        AC_SUBST([liburcu_LIBS])
-        break
-      ],[
-        CPPFLAGS="$save_CPPFLAGS"
-        LIBS="$save_LIBS"
-        with_urcu=no
-        # do not cache result of AC_SEARCH_LIBS test
-        unset ac_cv_search_rcu_set_pointer_sym
-      ])
-    done
-    CPPFLAGS="$save_CPPFLAGS"
-    LIBS="$save_LIBS"
-
-    AS_IF([test "$with_urcu" = "no"],[
-      AC_MSG_ERROR([liburcu is required])
-      ])
-  ])
+PKG_CHECK_MODULES([liburcu], [liburcu], [], [
+  AC_MSG_ERROR([liburcu not found])
 ])
 
 ])
@@ -418,8 +377,6 @@ KNOT_MODULE([rrl],         "yes")
 KNOT_MODULE([stats],       "yes")
 KNOT_MODULE([synthrecord], "yes")
 KNOT_MODULE([whoami],      "yes")
-KNOT_MODULE([updateproxy], "yes")
-KNOT_MODULE([queryignoretsig], "yes")
 
 AC_SUBST([STATIC_MODULES_DECLARS], [$(printf "$static_modules_declars")])
 AM_SUBST_NOTMAKE([STATIC_MODULES_DECLARS])
@@ -606,9 +563,9 @@ AS_IF([test "$enable_quic" != "no"], [
 # Dependencies needed for Knot DNS utilities
 ############################################
 
-dnl Check for libidn.
+dnl Check for libidn2.
 AC_ARG_WITH(libidn,
-  AS_HELP_STRING([--with-libidn=[DIR]], [Support IDN (needs GNU libidn2 or libidn)]),
+  AS_HELP_STRING([--with-libidn=[DIR]], [Support IDN (needs GNU libidn2)]),
   with_libidn=$withval,
   with_libidn=yes
 )
@@ -625,16 +582,9 @@ AS_IF([test "$enable_utilities" = "yes"], [
     PKG_CHECK_MODULES([libidn2], [libidn2 >= 2.0.0], [
       with_libidn=libidn2
       AC_DEFINE([LIBIDN], [1], [Define to 1 to enable IDN support])
-      AC_DEFINE([LIBIDN_HEADER], [<idn2.h>], [Define to proper libidn header])
     ], [
-      PKG_CHECK_MODULES([libidn], [libidn >= 0.0.0], [
-        with_libidn=libidn
-        AC_DEFINE([LIBIDN], [1], [Define to 1 to enable IDN support])
-        AC_DEFINE([LIBIDN_HEADER], [<idna.h>], [Define to proper libidn header])
-      ], [
-        with_libidn=no
-        AC_MSG_WARN([libidn2 or libidn not found])
-      ])
+      with_libidn=no
+      AC_MSG_WARN([libidn2 not found])
     ])
   ])
 
@@ -723,7 +673,7 @@ LIBS="$save_LIBS"
 
 # Checks for header files.
 AC_HEADER_RESOLV
-AC_CHECK_HEADERS_ONCE([pthread_np.h stdatomic.h sys/uio.h bsd/string.h])
+AC_CHECK_HEADERS_ONCE([pthread_np.h sys/uio.h bsd/string.h])
 
 # Checks for optional library functions.
 AC_CHECK_FUNCS([accept4 fgetln getline initgroups malloc_trim \
@@ -738,7 +688,7 @@ AC_CHECK_FUNC([explicit_memset], [
   AC_DEFINE([HAVE_EXPLICIT_MEMSET], [1], [explicit_memset available])
   explicit_memset=yes], [explicit_memset=no]
 )
-AM_CONDITIONAL([USE_GNUTLS_MEMSET], [test "$explicit_bzero" = "no" -a "$explicit_memset" = "no" -a "$gnutls_memset" = "yes"])
+AM_CONDITIONAL([USE_GNUTLS_MEMSET], [test "$explicit_bzero" = "no" -a "$explicit_memset" = "no"])
 
 # Check for mandatory library functions.
 AC_CHECK_FUNC([vasprintf], [], [
@@ -752,18 +702,23 @@ AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <pthread_np.h>]], [[cpuset_t set; CPU
 AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <sched.h>]], [[cpuset_t* set = cpuset_create(); cpuset_destroy(set);]])],
 [AC_DEFINE(HAVE_CPUSET_NETBSD, 1, [Define if cpuset_t and cpuset(3) exists.])])
 
-# Check for '__atomic' compiler builtin atomic functions.
+# Check for a C11 or GCC-style '__atomic' compiler builtin atomic functions.
+atomic_type="none"
 AC_LINK_IFELSE(
-  [AC_LANG_PROGRAM([[#include <stdint.h>]],
-                   [[uint64_t val = 0; __atomic_add_fetch(&val, 1, __ATOMIC_RELAXED);]])],
-  [AC_DEFINE(HAVE_ATOMIC, 1, [Define to 1 if you have '__atomic' functions.])]
-)
-
-# Check for '__sync' compiler builtin atomic functions.
-AC_LINK_IFELSE(
-  [AC_LANG_PROGRAM([[#include <stdint.h>]],
-                   [[int val = 0; __sync_add_and_fetch(&val, 1);]])],
-  [AC_DEFINE(HAVE_SYNC_ATOMIC, 1, [Define to 1 if you have '__sync' functions.])]
+  [AC_LANG_PROGRAM([[#if (__STDC_VERSION__ < 201112L) || defined(__STDC_NO_ATOMICS__)
+                     #error "No C11 atomics"
+                     #endif
+                     #include <stdatomic.h>]],
+                   [[atomic_uint_fast64_t val = 0;]]
+                   [[atomic_fetch_add_explicit(&val, 1, memory_order_relaxed);]])],
+  [AC_DEFINE(HAVE_C11_ATOMIC, 1, [Define to 1 if you have C11 'atomic' functions.])
+   atomic_type="C11"],
+  AC_LINK_IFELSE(
+    [AC_LANG_PROGRAM([[#include <stdint.h>]],
+                     [[uint64_t val = 0; __atomic_add_fetch(&val, 1, __ATOMIC_RELAXED);]])],
+    [AC_DEFINE(HAVE_GCC_ATOMIC, 1, [Define to 1 if you have GCC-style '__atomic' functions.])
+     atomic_type="__atomic"]
+  )
 )
 
 # Prepare CFLAG_VISIBILITY to be used where needed
@@ -777,29 +732,15 @@ AS_IF([test -n "$sanitizer_CFLAGS"], [CFLAGS="$CFLAGS $sanitizer_CFLAGS"])
 AM_CONDITIONAL([FUZZER], [test "$with_fuzzer" != "no"])
 AM_CONDITIONAL([OSS_FUZZ], [test "$with_oss_fuzz" != "no"])
 
-AS_IF([test "$enable_documentation" = "yes"],[
-
-AC_PATH_PROG([SPHINXBUILD], [sphinx-build], [false])
-AS_IF([test "$SPHINXBUILD" = "false"],
-  [AC_MSG_WARN([missing 'sphinx-build' executable for documentation generation])]
-)
-AC_PATH_PROG([PDFLATEX], [pdflatex], [false])
-AC_PATH_PROG([MAKEINFO], [makeinfo], [false])
-
-])
-
-AM_CONDITIONAL([HAVE_SPHINXBUILD], test "$SPHINXBUILD" != "false")
-AM_CONDITIONAL([HAVE_PDFLATEX], test "$PDFLATEX" != "false")
-AM_CONDITIONAL([HAVE_MAKEINFO], test "$MAKEINFO" != "false")
-
 # Strip -fdebug-prefix-map= parameters from flags for better reproducibility of binaries.
 filtered_cflags=$(echo -n "$CFLAGS" | \
                   sed 's/[[^[:alnum:]]]-f[[^[:space:]]]*-prefix-map=[[^[:space:]]]*//g')
 filtered_cppflags=$(echo -n "$CPPFLAGS" | \
                     sed 's/[[^[:alnum:]]]-f[[^[:space:]]]*-prefix-map=[[^[:space:]]]*//g')
+filtered_config_params=$(echo -n "$ac_configure_args" | \
+                         sed 's/[[^[:alnum:]]]-f[[^[:space:]]]*-prefix-map=[[^[:space:]]]*//g')
 
-result_msg_base="  Knot DNS $VERSION
-
+result_msg_base="
     Target:   $host_os $host_cpu $endianity
     Compiler: ${CC}
     CFLAGS:   ${filtered_cflags} ${filtered_cppflags}
@@ -829,6 +770,7 @@ result_msg_base="  Knot DNS $VERSION
     XDP support:            ${enable_xdp}
     DoQ support:            ${enable_quic}
     Socket polling:         ${socket_polling}
+    Atomic support:         ${atomic_type}
     Memory allocator:       ${with_memory_allocator}
     Fast zone parser:       ${enable_fastparser}
     Utilities with IDN:     ${with_libidn}
@@ -836,17 +778,17 @@ result_msg_base="  Knot DNS $VERSION
     Utilities with Dnstap:  ${enable_dnstap}
     MaxMind DB support:     ${enable_maxminddb}
     Systemd integration:    ${enable_systemd}
+    D-Bus support:          ${enable_dbus}
     POSIX capabilities:     ${enable_cap_ng}
     PKCS #11 support:       ${enable_pkcs11}
-    Ed25519 support:        ${enable_ed25519}
     Ed448 support:          ${enable_ed448}
-    Reproducible signing:   ${enable_repro_signing}
+
     Code coverage:          ${enable_code_coverage}
     Sanitizer:              ${with_sanitizer}
     LibFuzzer:              ${with_fuzzer}
     OSS-Fuzz:               ${with_oss_fuzz}"
 
-result_msg_esc=$(echo -n "$result_msg_base" | sed '$!s/$/\\n/' | tr -d '\n')
+result_msg_esc=$(echo -n "    Configure:$filtered_config_params\n$result_msg_base" | sed '$!s/$/\\n/' | tr -d '\n')
 
 AC_DEFINE_UNQUOTED([CONFIGURE_SUMMARY],["$result_msg_esc"],[Configure summary])
 
@@ -877,5 +819,6 @@ AC_CONFIG_FILES([doc/modules.rst],
 
 AC_OUTPUT
 AC_MSG_RESULT([
+  Knot DNS $VERSION
 $result_msg_base
 ])

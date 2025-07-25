@@ -1,4 +1,4 @@
-/*  Copyright (C) 2023 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2024 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -30,9 +30,9 @@
 #include "knot/nameserver/notify.h"
 #include "knot/server/server.h"
 #include "libknot/libknot.h"
-#ifdef ENABLE_QUIC
-#include "libknot/quic/quic.h"
-#endif // ENABLE_QUIC
+#include "libknot/quic/quic_conn.h"
+#include "libknot/quic/tls_common.h"
+#include "libknot/quic/tls.h"
 #include "contrib/base64.h"
 #include "contrib/macros.h"
 #include "contrib/mempattern.h"
@@ -147,7 +147,7 @@ static int process_query_in(knot_layer_t *ctx, knot_pkt_t *pkt)
 /*!
  * \brief Create a response for a given query in the INTERNET class.
  */
-static int query_internet(knot_pkt_t *pkt, knot_layer_t *ctx)
+static knot_layer_state_t query_internet(knot_pkt_t *pkt, knot_layer_t *ctx)
 {
 	knotd_qdata_t *data = QUERY_DATA(ctx);
 
@@ -167,7 +167,7 @@ static int query_internet(knot_pkt_t *pkt, knot_layer_t *ctx)
 /*!
  * \brief Create a response for a given query in the CHAOS class.
  */
-static int query_chaos(knot_pkt_t *pkt, knot_layer_t *ctx)
+static knot_layer_state_t query_chaos(knot_pkt_t *pkt, knot_layer_t *ctx)
 {
 	knotd_qdata_t *data = QUERY_DATA(ctx);
 
@@ -203,7 +203,7 @@ static zone_t *answer_zone_find(const knot_pkt_t *query, knot_zonedb_t *zonedb)
 	 * records are only present in a parent zone.
 	 */
 	if (qtype == KNOT_RRTYPE_DS) {
-		const knot_dname_t *parent = knot_wire_next_label(qname, NULL);
+		const knot_dname_t *parent = knot_dname_next_label(qname);
 		zone = knot_zonedb_find_suffix(zonedb, parent);
 		/* If zone does not exist, search for its parent zone,
 		   this will later result to NODATA answer. */
@@ -364,6 +364,7 @@ static int answer_edns_put(knot_pkt_t *resp, knotd_qdata_t *qdata)
 	if (knot_pkt_edns_option(qdata->query, KNOT_EDNS_OPTION_EXPIRE) != NULL &&
 	    qdata->extra->contents != NULL && !qdata->extra->zone->is_catalog_flag) {
 		int64_t timer = qdata->extra->zone->timers.next_expire;
+		timer = knot_time_min(timer, qdata->extra->contents->dnssec_expire); // NOOP if zero
 		timer = (timer == 0 ? zone_soa_expire(qdata->extra->zone) : timer - time(NULL));
 		timer = MAX(timer, 0);
 		uint32_t timer_be;
@@ -389,8 +390,8 @@ static int answer_edns_put(knot_pkt_t *resp, knotd_qdata_t *qdata)
 		return ret;
 	}
 
-	/* Align the response if QUIC with EDNS. */
-	if (qdata->params->proto == KNOTD_QUERY_PROTO_QUIC) {
+	/* Align the response if QUIC or TLS with EDNS. */
+	if (qdata->params->proto == KNOTD_QUERY_PROTO_QUIC || qdata->params->proto == KNOTD_QUERY_PROTO_TLS) {
 		int pad_len = knot_pkt_default_padding_size(resp, &qdata->opt_rr);
 		if (pad_len > -1) {
 			ret = knot_edns_reserve_option(&qdata->opt_rr, KNOT_EDNS_OPTION_PADDING,
@@ -506,7 +507,7 @@ static void set_rcode_to_packet(knot_pkt_t *pkt, knotd_qdata_t *qdata)
 	knot_wire_set_rcode(pkt->wire, KNOT_EDNS_RCODE_LO(qdata->rcode));
 }
 
-static int process_query_err(knot_layer_t *ctx, knot_pkt_t *pkt)
+static knot_layer_state_t process_query_err(knot_layer_t *ctx, knot_pkt_t *pkt)
 {
 	assert(ctx && pkt);
 
@@ -552,7 +553,8 @@ static int process_query_err(knot_layer_t *ctx, knot_pkt_t *pkt)
 #define PROCESS_BEGIN(plan, step, next_state, qdata) \
 	if (plan != NULL) { \
 		WALK_LIST(step, plan->stage[KNOTD_STAGE_BEGIN]) { \
-			next_state = step->process(next_state, pkt, qdata, step->ctx); \
+			assert(step->type == QUERY_HOOK_TYPE_GENERAL); \
+			next_state = step->general_hook(next_state, pkt, qdata, step->ctx); \
 			if (next_state == KNOT_STATE_FAIL) { \
 				goto finish; \
 			} \
@@ -562,7 +564,8 @@ static int process_query_err(knot_layer_t *ctx, knot_pkt_t *pkt)
 #define PROCESS_END(plan, step, next_state, qdata) \
 	if (plan != NULL) { \
 		WALK_LIST(step, plan->stage[KNOTD_STAGE_END]) { \
-			next_state = step->process(next_state, pkt, qdata, step->ctx); \
+			assert(step->type == QUERY_HOOK_TYPE_GENERAL); \
+			next_state = step->general_hook(next_state, pkt, qdata, step->ctx); \
 			if (next_state == KNOT_STATE_FAIL) { \
 				next_state = process_query_err(ctx, pkt); \
 			} \
@@ -705,43 +708,53 @@ bool process_query_acl_check(conf_t *conf, acl_action_t action,
 	bool automatic = false;
 	bool allowed = false;
 
+	struct gnutls_session_int *tls_session;
+	switch (qdata->params->proto) {
+	case KNOTD_QUERY_PROTO_QUIC: tls_session = qdata->params->quic_conn->tls_session; break;
+	case KNOTD_QUERY_PROTO_TLS:  tls_session = qdata->params->tls_conn->session; break;
+	default:                     tls_session = NULL;
+	}
+
 	if (action != ACL_ACTION_UPDATE) {
 		// ACL_ACTION_QUERY is used for SOA/refresh query.
 		assert(action == ACL_ACTION_QUERY || action == ACL_ACTION_NOTIFY ||
 		       action == ACL_ACTION_TRANSFER);
 		const yp_name_t *item = (action == ACL_ACTION_NOTIFY) ? C_MASTER : C_NOTIFY;
 		conf_val_t rmts = conf_zone_get(conf, item, zone_name);
-		allowed = rmt_allowed(conf, &rmts, query_source, &tsig,
-		                      qdata->params->quic_conn);
+		allowed = rmt_allowed(conf, &rmts, query_source, &tsig, tls_session);
 		automatic = allowed;
 	}
 	if (!allowed) {
 		conf_val_t acl = conf_zone_get(conf, C_ACL, zone_name);
 		allowed = acl_allowed(conf, &acl, action, query_source, &tsig,
-		                      zone_name, query, qdata->params->quic_conn);
+		                      zone_name, query, tls_session);
 	}
 
 	if (log_enabled_debug()) {
 		int pin_size = 0;
-#ifdef ENABLE_QUIC
-		uint8_t bin_pin[KNOT_QUIC_PIN_LEN], pin[2 * KNOT_QUIC_PIN_LEN];
+		uint8_t bin_pin[KNOT_TLS_PIN_LEN], pin[2 * KNOT_TLS_PIN_LEN];
 		size_t bin_pin_size = sizeof(bin_pin);
-		knot_quic_conn_pin(qdata->params->quic_conn, bin_pin, &bin_pin_size, false);
+		knot_tls_pin(tls_session, bin_pin, &bin_pin_size, false);
 		if (bin_pin_size > 0) {
 			pin_size = knot_base64_encode(bin_pin, bin_pin_size, pin, sizeof(pin));
 		}
-#else
-		uint8_t pin[1];
-#endif // ENABLE_QUIC
+
+		const char *proto_str;
+		switch (qdata->params->proto) {
+		case KNOTD_QUERY_PROTO_UDP:  proto_str = " UDP"; break;
+		case KNOTD_QUERY_PROTO_TCP:  proto_str = " TCP"; break;
+		case KNOTD_QUERY_PROTO_QUIC: proto_str = " QUIC"; break;
+		case KNOTD_QUERY_PROTO_TLS:  proto_str = " TLS"; break;
+		default:                     proto_str = "";
+		}
 
 		log_zone_debug(zone_name,
 		               "ACL, %s, action %s, remote %s%s%s%s%s%.*s%s",
 		               allowed ? "allowed" : "denied",
 		               (act != NULL) ? act->name : "query",
-		               addr_str,
+		               addr_str, proto_str,
 		               (key_name[0] != '\0') ? ", key " : "",
 		               (key_name[0] != '\0') ? key_name : "",
-		               (qdata->params->proto == KNOTD_QUERY_PROTO_QUIC) ? ", QUIC" : "",
 		               (pin_size > 0) ? " cert-key " : "",
 		               (pin_size > 0) ? pin_size : 0,
 		               (pin_size > 0) ? (const char *)pin : "",
@@ -992,6 +1005,30 @@ int process_query_put_rr(knot_pkt_t *pkt, knotd_qdata_t *qdata,
 	}
 
 	return ret;
+}
+
+knotd_proto_state_t process_query_proto(knotd_qdata_params_t *params,
+                                        const knotd_stage_t stage)
+{
+	assert(params);
+	assert(stage == KNOTD_STAGE_PROTO_BEGIN || stage == KNOTD_STAGE_PROTO_END);
+
+	knotd_proto_state_t state = KNOTD_PROTO_STATE_PASS;
+
+	rcu_read_lock();
+
+	struct query_plan *plan = conf()->query_plan;
+	if (plan != NULL) {
+		struct query_step *step;
+		WALK_LIST(step, plan->stage[stage]) {
+			assert(step->type == QUERY_HOOK_TYPE_PROTO);
+			state = step->proto_hook(state, params, step->ctx);
+		}
+	}
+
+	rcu_read_unlock();
+
+	return state;
 }
 
 /*! \brief Module implementation. */

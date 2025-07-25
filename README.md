@@ -1,6 +1,5 @@
 [![Coverity Status](https://img.shields.io/coverity/scan/knot-dns.svg)](https://scan.coverity.com/projects/knot-dns)
 [![Fuzzing Status](https://oss-fuzz-build-logs.storage.googleapis.com/badges/knot-dns.svg)](https://bugs.chromium.org/p/oss-fuzz/issues/list?sort=-opened&can=1&q=proj:knot-dns)
-[![Documentation Status](https://readthedocs.org/projects/knot/badge/?version=master)](https://knot.readthedocs.io/en/master/)
 
 # Requirements
 
@@ -29,7 +28,7 @@ sudo apt-get install \
 #### Install optional packages:
 ```bash
 sudo apt-get install \
-  libcap-ng-dev libsystemd-dev libidn2-0-dev libprotobuf-c-dev protobuf-c-compiler libfstrm-dev libmaxminddb-dev libnghttp2-dev libbpf-dev libxdp-dev libmnl-dev python3-sphinx python3-sphinx-panels
+  libcap-ng-dev libsystemd-dev libidn2-dev libprotobuf-c-dev protobuf-c-compiler libfstrm-dev libmaxminddb-dev libnghttp2-dev libbpf-dev libxdp-dev libmnl-dev python3-sphinx python3-sphinx-panels
 ```
 
 ### Fedora like distributions

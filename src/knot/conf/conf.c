@@ -1,4 +1,4 @@
-/*  Copyright (C) 2023 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2024 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -606,8 +606,9 @@ void conf_mix_iter_next(
 	}
 }
 
-int64_t conf_int(
-	conf_val_t *val)
+int64_t conf_int_alt(
+	conf_val_t *val,
+	bool alternative)
 {
 	assert(val != NULL && val->item != NULL);
 	assert(val->item->type == YP_TINT ||
@@ -618,7 +619,7 @@ int64_t conf_int(
 		conf_val(val);
 		return yp_int(val->data);
 	} else {
-		return val->item->var.i.dflt;
+		return alternative ? val->item->var.i.dflt_alt : val->item->var.i.dflt;
 	}
 }
 
@@ -1063,7 +1064,7 @@ static int str_label(
 	size_t index = labels - right_index - 1;
 
 	// Create a dname from the single label.
-	size_t prefix_len = knot_dname_prefixlen(zone, index, NULL);
+	size_t prefix_len = knot_dname_prefixlen(zone, index);
 	size_t label_len = *(zone + prefix_len);
 	memcpy(label, zone + prefix_len, 1 + label_len);
 	label[1 + label_len] = '\0';
@@ -1379,6 +1380,8 @@ conf_remote_t conf_remote_txn(
 
 	conf_val_t val = conf_id_get_txn(conf, txn, C_RMT, C_QUIC, id);
 	out.quic = conf_bool(&val);
+	val = conf_id_get_txn(conf, txn, C_RMT, C_TLS, id);
+	out.tls = conf_bool(&val);
 
 	conf_val_t rundir_val = conf_get_txn(conf, txn, C_SRV, C_RUNDIR);
 	char *rundir = conf_abs_path(&rundir_val, NULL);
@@ -1398,7 +1401,7 @@ conf_remote_t conf_remote_txn(
 		conf_val_next(&val);
 	}
 	// Index overflow causes empty socket.
-	out.addr = conf_addr_alt(&val, rundir, out.quic);
+	out.addr = conf_addr_alt(&val, rundir, out.quic || out.tls);
 
 	// Get outgoing address if family matches (optional).
 	uint16_t via_pos = 0;

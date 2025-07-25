@@ -24,6 +24,7 @@ Build-Depends:
  libmnl-dev,
  libnghttp2-dev,
  libprotobuf-c-dev,
+ libsofthsm2 <!nocheck>,
  libsystemd-dev [linux-any] | libsystemd-daemon-dev [linux-any],
  libsystemd-dev [linux-any] | libsystemd-journal-dev [linux-any],
  libtool,
@@ -31,7 +32,6 @@ Build-Depends:
  pkg-config,
  protobuf-c-compiler,
  python3-all,
- softhsm2 <!nocheck>,
 Standards-Version: 4.5.0
 Homepage: https://www.knot-dns.cz/
 Vcs-Browser: https://gitlab.nic.cz/knot/knot-dns
@@ -43,7 +43,7 @@ Architecture: any
 Depends:
  adduser,
  libdnssec9 (= ${binary:Version}),
- libknot14 (= ${binary:Version}),
+ libknot15 (= ${binary:Version}),
  libzscanner4 (= ${binary:Version}),
  ${misc:Depends},
  ${shlibs:Depends},
@@ -59,7 +59,7 @@ Description: Authoritative domain name server
  registry and hence is well suited to run anything from the root
  zone, the top-level domain, to many smaller standard domain names.
 
-Package: libknot14
+Package: libknot15
 Architecture: any
 Depends:
  ${misc:Depends},
@@ -115,10 +115,9 @@ Architecture: any
 Depends:
  libdnssec9 (= ${binary:Version}),
  libgnutls28-dev,
- libknot14 (= ${binary:Version}),
+ libknot15 (= ${binary:Version}),
  libzscanner4 (= ${binary:Version}),
  ${misc:Depends},
- ${shlibs:Depends},
 Section: libdevel
 Description: Knot DNS shared library development files
  Knot DNS is a fast, authoritative only, high performance, feature
@@ -134,7 +133,7 @@ Package: knot-dnsutils
 Architecture: any
 Depends:
  libdnssec9 (= ${binary:Version}),
- libknot14 (= ${binary:Version}),
+ libknot15 (= ${binary:Version}),
  libzscanner4 (= ${binary:Version}),
  ${misc:Depends},
  ${shlibs:Depends},
@@ -161,7 +160,7 @@ Package: knot-dnssecutils
 Architecture: any
 Depends:
  libdnssec9 (= ${binary:Version}),
- libknot14 (= ${binary:Version}),
+ libknot15 (= ${binary:Version}),
  libzscanner4 (= ${binary:Version}),
  ${misc:Depends},
  ${shlibs:Depends},
@@ -183,7 +182,7 @@ Package: knot-host
 Architecture: any
 Depends:
  libdnssec9 (= ${binary:Version}),
- libknot14 (= ${binary:Version}),
+ libknot15 (= ${binary:Version}),
  libzscanner4 (= ${binary:Version}),
  ${misc:Depends},
  ${shlibs:Depends},
@@ -269,7 +268,7 @@ Description: Prometheus exporter for Knot DNS
 Package: python3-libknot
 Architecture: all
 Depends:
- libknot14 (= ${binary:Version}),
+ libknot15 (= ${binary:Version}),
  ${misc:Depends},
  ${python3:Depends},
 Section: python

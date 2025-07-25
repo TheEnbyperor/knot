@@ -65,7 +65,8 @@ Options
   Print the program help.
 
 **-V**, **--version**
-  Print the program version.
+  Print the program version. The option **-VV** makes the program
+  print the compile time configuration summary.
 
 Actions
 .......
@@ -150,8 +151,9 @@ Actions
   explicitly. If zone flushing is disabled, the original zone file is backed
   up instead of writing out zone contents to a file. When backing-up a catalog
   zone, it is recommended to prevent ongoing changes to it by use of
-  **zone-freeze**.
-  See :ref:`Notes<notes>` below about the directory permissions. (#)
+  **zone-freeze**. The force option allows an already existing backupdir to
+  be overwritten. See :ref:`Notes<notes>` below about the directory permissions.
+  (#)
 
 **zone-restore** [*zone*...] **+backupdir** *directory* [*filter*...]
   Trigger a zone data and metadata restore from a specified backup directory.
@@ -163,6 +165,10 @@ Actions
 **zone-sign** [*zone*...]
   Trigger a DNSSEC re-sign of the zone. Existing signatures will be dropped.
   This command is valid for zones with DNSSEC signing enabled. (#)
+
+**zone-validate** [*zone*...]
+  Trigger a DNSSEC validation of the zone. If the validation fails and the
+  zone is secondary, the zone expires immediately! (#)
 
 **zone-keys-load** [*zone*...]
   Trigger a load of DNSSEC keys and other signing material from KASP database
@@ -184,7 +190,8 @@ Actions
 **zone-freeze** [*zone*...]
   Trigger a zone freeze. All running events will be finished and all new and pending
   (planned) zone-changing events (load, refresh, update, flush, and DNSSEC signing)
-  will be held up until the zone is thawed. (#)
+  will be held up until the zone is thawed. Up to 8 (this limit is hardcoded) DDNS
+  updates per zone will be queued, subsequent updates will be refused. (#)
 
 **zone-thaw** [*zone*...]
   Trigger dismissal of zone freeze. (#)

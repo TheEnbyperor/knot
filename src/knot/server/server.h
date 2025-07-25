@@ -1,4 +1,4 @@
-/*  Copyright (C) 2023 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2024 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -16,8 +16,7 @@
 
 #pragma once
 
-#include <stdatomic.h>
-
+#include "contrib/atomic.h"
 #include "knot/conf/conf.h"
 #include "knot/catalog/catalog_update.h"
 #include "knot/common/evsched.h"
@@ -32,7 +31,7 @@
 
 struct server;
 struct knot_xdp_socket;
-struct knot_quic_creds;
+struct knot_creds;
 
 /*!
  * \brief I/O handler structure.
@@ -75,7 +74,7 @@ typedef struct {
 	unsigned fd_xdp_count;
 	unsigned xdp_first_thread_id;
 	bool anyaddr;
-	bool quic;
+	bool tls;
 	struct knot_xdp_socket **xdp_sockets;
 	struct sockaddr_storage addr;
 } iface_t;
@@ -120,16 +119,20 @@ typedef struct server {
 	iface_t *ifaces;
 	size_t n_ifaces;
 	bool quic_active;
+	bool tls_active;
+
+	/*! \brief Mutex protecting simultaneous access from concurrent CTL threads. */
+	pthread_rwlock_t ctl_lock;
 
 	/*! \brief Pending changes to catalog member zones, update indication. */
 	catalog_update_t catalog_upd;
-	atomic_bool catalog_upd_signal;
+	knot_atomic_bool catalog_upd_signal;
 
 	/*! \brief Context of pending zones' backup. */
 	zone_backup_ctxs_t backup_ctxs;
 
 	/*! \brief Crendentials context for QUIC. */
-	struct knot_quic_creds *quic_creds;
+	struct knot_creds *quic_creds;
 } server_t;
 
 /*!

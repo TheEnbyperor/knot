@@ -171,14 +171,15 @@ class Response(object):
         compare(edns_ver, self.resp.edns, "EDNS VERSION")
 
         # Check rcode.
-        if type(rcode) is not str:
-            rc = dns.rcode.to_text(rcode)
-        else:
-            rc = rcode
-        compare(dns.rcode.to_text(self.resp.rcode()), rc, "RCODE")
+        if rcode is not None:
+            if type(rcode) is not str:
+                rc = dns.rcode.to_text(rcode)
+            else:
+                rc = rcode
+            compare(dns.rcode.to_text(self.resp.rcode()), rc, "RCODE")
 
         # Check rdata only if NOERROR.
-        if rc == "NOERROR":
+        if rcode is None or rc == "NOERROR":
             self.check_record(section="answer", rtype=self.rtype, ttl=ttl,
                               rdata=rdata, nordata=nordata)
 
@@ -328,9 +329,9 @@ class Response(object):
         if found != expected:
             set_err("CHECK RR COUNT")
             check_log("ERROR: CHECK RR COUNT")
-            detail_log("!Invalid RR count type=%s section=%s" % (
+            detail_log("!Invalid RR count type=%s section=%s %d!=%d" % (
                 rtype if rtype is not None else "",
-                section
+                section, found, expected
             ))
             detail_log(SEP)
 

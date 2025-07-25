@@ -28,6 +28,9 @@
 #include "knot/zone/zone.h"
 #include "libdnssec/random.h"
 #include "libknot/libknot.h"
+#include "libknot/quic/quic_conn.h"
+#include "libknot/quic/quic.h"
+#include "libknot/quic/tls.h"
 #include "contrib/net.h"
 #include "contrib/time.h"
 
@@ -51,6 +54,33 @@ static void init_qdata_from_request(knotd_qdata_t *qdata,
 	qdata->extra->zone = zone;
 }
 
+#ifdef ENABLE_QUIC
+static int ddnsq_alloc_reply(knot_quic_reply_t *r)
+{
+	r->out_payload->iov_len = KNOT_WIRE_MAX_PKTSIZE;
+
+	return KNOT_EOK;
+}
+
+static int ddnsq_send_reply(knot_quic_reply_t *r)
+{
+	int fd = *(int *)r->sock;
+	int ret = net_dgram_send(fd, r->out_payload->iov_base, r->out_payload->iov_len, r->ip_rem);
+	if (ret < 0) {
+		return knot_map_errno();
+	} else if (ret == r->out_payload->iov_len) {
+		return KNOT_EOK;
+	} else {
+		return KNOT_EAGAIN;
+	}
+}
+
+static void ddnsq_free_reply(knot_quic_reply_t *r)
+{
+	r->out_payload->iov_len = 0;
+}
+#endif // ENABLE_QUIC
+
 static int check_prereqs(knot_request_t *request,
                          zone_update_t *update,
                          knotd_qdata_t *qdata)
@@ -59,6 +89,15 @@ static int check_prereqs(knot_request_t *request,
 	int ret = ddns_process_prereqs(request->query, update, &rcode);
 	if (ret != KNOT_EOK) {
 		UPDATE_LOG(LOG_WARNING, qdata, "prerequisites not met (%s)",
+		           knot_strerror(ret));
+		assert(rcode != KNOT_RCODE_NOERROR);
+		knot_wire_set_rcode(request->resp->wire, rcode);
+		return ret;
+	}
+
+	ret = ddns_precheck_update(request->query, update, &rcode);
+	if (ret != KNOT_EOK) {
+		UPDATE_LOG(LOG_WARNING, qdata, "broken update format (%s)",
 		           knot_strerror(ret));
 		assert(rcode != KNOT_RCODE_NOERROR);
 		knot_wire_set_rcode(request->resp->wire, rcode);
@@ -104,6 +143,7 @@ static int process_bulk(zone_t *zone, list_t *requests, zone_update_t *up)
 		knot_request_t *req = node->d;
 		// Init qdata structure for logging (unique per-request).
 		knotd_qdata_params_t params = {
+			.proto = flags2proto(req->flags),
 			.remote = &req->remote
 		};
 		knotd_qdata_t qdata;
@@ -118,6 +158,8 @@ static int process_bulk(zone_t *zone, list_t *requests, zone_update_t *up)
 
 		ret = process_single_update(req, up, &qdata);
 		if (ret != KNOT_EOK) {
+			log_zone_error(zone->name, "DDNS, dropping %zu updates in a bulk",
+			               list_size(requests));
 			return ret;
 		}
 	}
@@ -338,6 +380,39 @@ static void send_update_response(conf_t *conf, zone_t *zone, knot_request_t *req
 			(void)process_query_sign_response(req->resp, &qdata);
 		}
 
+		if (net_is_stream(req->fd) && req->tls_req_ctx.conn != NULL) {
+			(void)knot_tls_send_dns(req->tls_req_ctx.conn,
+			                        req->resp->wire, req->resp->size);
+			knot_tls_conn_block(req->tls_req_ctx.conn, false);
+		}
+#ifdef ENABLE_QUIC
+		else if (req->quic_conn != NULL) {
+			assert(!net_is_stream(req->fd));
+			uint8_t op_buf[KNOT_WIRE_MAX_PKTSIZE];
+			struct iovec out_payload = { .iov_base = op_buf, .iov_len = sizeof(op_buf) };
+			knot_quic_reply_t rpl = {
+				.ip_rem = &req->remote,
+				.ip_loc = &req->source,
+				.in_payload = NULL,
+				.out_payload = &out_payload,
+				.sock = &req->fd,
+				.alloc_reply = ddnsq_alloc_reply,
+				.send_reply = ddnsq_send_reply,
+				.free_reply = ddnsq_free_reply
+			};
+
+			void *succ = knot_quic_stream_add_data(req->quic_conn, req->quic_stream,
+			                                       req->resp->wire, req->resp->size);
+			if (succ != NULL) { // else ENOMEM
+				(void)knot_quic_send(req->quic_conn->quic_table, req->quic_conn,
+				                     &rpl, 4, KNOT_QUIC_SEND_IGNORE_BLOCKED);
+			}
+			knot_quic_conn_block(req->quic_conn, false);
+		} else // NOTE ties to 'if' below
+#else
+		assert(req->quic_conn == NULL);
+#endif // ENABLE_QUIC
+
 		if (net_is_stream(req->fd)) {
 			net_dns_tcp_send(req->fd, req->resp->wire, req->resp->size,
 			                 conf->cache.srv_tcp_remote_io_timeout, NULL);
@@ -348,22 +423,13 @@ static void send_update_response(conf_t *conf, zone_t *zone, knot_request_t *req
 	}
 }
 
-static void free_request(knot_request_t *req)
-{
-	close(req->fd);
-	knot_pkt_free(req->query);
-	knot_pkt_free(req->resp);
-	dnssec_binary_free(&req->sign.tsig_key.secret);
-	free(req);
-}
-
 static void send_update_responses(conf_t *conf, zone_t *zone, list_t *updates)
 {
 	ptrnode_t *node, *nxt;
 	WALK_LIST_DELSAFE(node, nxt, *updates) {
 		knot_request_t *req = node->d;
 		send_update_response(conf, zone, req);
-		free_request(req);
+		knot_request_free(req, NULL);
 	}
 	ptrlist_free(updates, NULL);
 }

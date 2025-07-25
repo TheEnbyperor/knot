@@ -1,4 +1,4 @@
-/*  Copyright (C) 2021 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2024 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -25,11 +25,8 @@
 
 /*!
  * \brief Answer query from an IN class zone.
- *
- * \retval KNOT_STATE_FAIL if it encountered an error.
- * \retval KNOT_STATE_DONE if finished.
  */
-int internet_process_query(knot_pkt_t *pkt, knotd_qdata_t *qdata);
+knot_layer_state_t internet_process_query(knot_pkt_t *pkt, knotd_qdata_t *qdata);
 
 /*! \brief Require given QUERY TYPE or return error code. */
 #define NS_NEED_QTYPE(qdata, qtype_want, error_rcode) \
@@ -68,12 +65,6 @@ int internet_process_query(knot_pkt_t *pkt, knotd_qdata_t *qdata);
 	if (!process_query_acl_check(conf(), (action), (qdata)) || \
 	    process_query_verify(qdata) != KNOT_EOK) { \
 		return KNOT_STATE_FAIL; \
-	}
-
-/*! \brief Require the zone not to be frozen. */
-#define NS_NEED_NOT_FROZEN(qdata) \
-	if ((qdata)->extra->zone->events.ufrozen) { \
-		(qdata)->rcode = KNOT_RCODE_REFUSED; \
-		(qdata)->rcode_ede = KNOT_EDNS_EDE_NOT_READY; \
-		return KNOT_STATE_FAIL; \
+	} else { \
+		qdata->params->flags |= KNOTD_QUERY_FLAG_AUTHORIZED; \
 	}

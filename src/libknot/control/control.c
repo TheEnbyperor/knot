@@ -36,9 +36,6 @@
 #define CTL_BUFF_SIZE		(256 * 1024)
 #endif
 
-/*! Listen backlog size. */
-#define DEFAULT_LISTEN_BACKLOG		5
-
 /*! Default socket operations timeout in milliseconds. */
 #define DEFAULT_TIMEOUT		(30 * 1000)
 
@@ -166,6 +163,18 @@ knot_ctl_t* knot_ctl_alloc(void)
 }
 
 _public_
+knot_ctl_t* knot_ctl_clone(knot_ctl_t *ctx)
+{
+	knot_ctl_t *res = knot_ctl_alloc();
+	if (res != NULL) {
+		res->timeout = ctx->timeout;
+		res->sock = ctx->sock;
+		ctx->sock = -1;
+	}
+	return res;
+}
+
+_public_
 void knot_ctl_free(knot_ctl_t *ctx)
 {
 	if (ctx == NULL) {
@@ -194,13 +203,7 @@ void knot_ctl_set_timeout(knot_ctl_t *ctx, int timeout_ms)
 }
 
 _public_
-int knot_ctl_bind(knot_ctl_t *ctx, const char *path)
-{
-	return knot_ctl_bind2(ctx, path, DEFAULT_LISTEN_BACKLOG);
-}
-
-_public_
-int knot_ctl_bind2(knot_ctl_t *ctx, const char *path, unsigned backlog)
+int knot_ctl_bind(knot_ctl_t *ctx, const char *path, unsigned backlog)
 {
 	if (ctx == NULL || path == NULL) {
 		return KNOT_EINVAL;
