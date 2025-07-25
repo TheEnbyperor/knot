@@ -1059,16 +1059,23 @@ void print_data_xfr(const knot_pkt_t *packet,
 	}
 
 	const knot_pktsection_t *answers = knot_pkt_section(packet, KNOT_ANSWER);
+	uint16_t ancount = answers->count;
 
 	switch (style->format) {
 	case FORMAT_DIG:
-		print_section_dig(knot_pkt_rr(answers, 0), answers->count, style);
+		if (ancount > 0) {
+			print_section_dig(knot_pkt_rr(answers, 0), ancount, style);
+		}
 		break;
 	case FORMAT_HOST:
-		print_section_host(knot_pkt_rr(answers, 0), answers->count, style);
+		if (ancount > 0) {
+			print_section_host(knot_pkt_rr(answers, 0), ancount, style);
+		}
 		break;
 	case FORMAT_FULL:
-		print_section_full(knot_pkt_rr(answers, 0), answers->count, style, true);
+		if (ancount > 0) {
+			print_section_full(knot_pkt_rr(answers, 0), ancount, style, true);
+		}
 
 		// Print TSIG record.
 		if (style->show_tsig && knot_pkt_has_tsig(packet)) {
@@ -1155,9 +1162,9 @@ void print_packet(const knot_pkt_t *packet,
 
 	uint16_t qdcount = packet->parsed >= KNOT_WIRE_OFFSET_ANCOUNT ?
 	                   knot_wire_get_qdcount(packet->wire) : 0;
-	uint16_t ancount = packet->sections[KNOT_ANSWER].count;
-	uint16_t nscount = packet->sections[KNOT_AUTHORITY].count;
-	uint16_t arcount = packet->sections[KNOT_ADDITIONAL].count;
+	uint16_t ancount = answers->count;
+	uint16_t nscount = authority->count;
+	uint16_t arcount = additional->count;
 
 	// Disable additionals printing if there are no other records.
 	// OPT record may be placed anywhere within additionals!

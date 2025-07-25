@@ -10,9 +10,10 @@ libcontrib_LIBS        += $(gnutls_LIBS)
 endif USE_GNUTLS_MEMSET
 
 EXTRA_DIST += \
-	contrib/licenses/0BSD			\
+	contrib/licenses/ISC			\
 	contrib/licenses/BSD-3-Clause		\
-	contrib/licenses/LGPL-2.0		\
+	contrib/licenses/GPL-2.0-or-later	\
+	contrib/licenses/LGPL-2.0-or-later	\
 	contrib/licenses/MIT			\
 	contrib/musl/LICENSE			\
 	contrib/libngtcp2/LICENSE		\
@@ -76,7 +77,6 @@ libcontrib_la_SOURCES = \
 	contrib/proxyv2/proxyv2.c		\
 	contrib/proxyv2/proxyv2.h		\
 	contrib/ucw/array-sort.h		\
-	contrib/ucw/binsearch.h			\
 	contrib/ucw/heap.c			\
 	contrib/ucw/heap.h			\
 	contrib/ucw/lists.c			\
@@ -220,6 +220,8 @@ libembngtcp2_la_SOURCES = \
 	contrib/libngtcp2/ngtcp2/lib/ngtcp2_version.c \
 	contrib/libngtcp2/ngtcp2/lib/ngtcp2_window_filter.c \
 	contrib/libngtcp2/ngtcp2/lib/ngtcp2_window_filter.h \
+	contrib/libngtcp2/ngtcp2/lib/ngtcp2_dcidtr.c \
+	contrib/libngtcp2/ngtcp2/lib/ngtcp2_dcidtr.h \
 	contrib/libngtcp2/ngtcp2/ngtcp2.h \
 	contrib/libngtcp2/ngtcp2/ngtcp2_crypto.h \
 	contrib/libngtcp2/ngtcp2/ngtcp2_crypto_gnutls.h \

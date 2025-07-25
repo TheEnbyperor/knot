@@ -344,7 +344,7 @@ build:documentation:
       - pkg/
     expire_in: '1 week'
   script:
-    - python3 -m pip install apkg
+    - python3 -m pip install git+https://gitlab.nic.cz/packaging/apkg.git
     # make sure the archive from pkg:make-archive is available
     - apkg info cache | grep archive/dev
     - apkg install --build-dep
@@ -374,6 +374,10 @@ pkg:make-archive:
     - python3 -m pip install apkg
     - apkg build-dep
     - apkg make-archive
+
+pkg:debian-13:
+  <<: *pkg_test_deb
+  image: $CI_REGISTRY/packaging/apkg/test/debian-13
 
 pkg:debian-12:
   <<: *pkg_test_deb
