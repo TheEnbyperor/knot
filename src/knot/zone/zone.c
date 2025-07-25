@@ -1,4 +1,4 @@
-/*  Copyright (C) 2023 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2024 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -94,12 +94,14 @@ static int flush_journal(conf_t *conf, zone_t *zone, bool allow_empty_zone, bool
 	}
 
 	/* Check for updated zone. */
+	rcu_read_lock();
 	zone_contents_t *contents = zone->contents;
 	uint32_t serial_to = zone_contents_serial(contents);
 	if (!force && !user_flush &&
 	    zone->zonefile.exists && zone->zonefile.serial == serial_to &&
 	    !zone->zonefile.retransfer && !zone->zonefile.resigned) {
 		ret = KNOT_EOK; /* No differences. */
+		rcu_read_unlock();
 		goto flush_journal_replan;
 	}
 
@@ -107,6 +109,7 @@ static int flush_journal(conf_t *conf, zone_t *zone, bool allow_empty_zone, bool
 
 	/* Synchronize journal. */
 	ret = zonefile_write(zonefile, contents);
+	rcu_read_unlock();
 	if (ret != KNOT_EOK) {
 		log_zone_warning(zone->name, "failed to update zone file (%s)",
 		                 knot_strerror(ret));
@@ -285,6 +288,7 @@ int selective_zone_purge(conf_t *conf, zone_t *zone, purge_flag_t params)
 		zone->timers = (zone_timers_t) {
 			.catalog_member = zone->timers.catalog_member
 		};
+		zone_timers_sanitize(conf, zone);
 		zone->zonefile.bootstrap_cnt = 0;
 		ret = zone_timers_sweep(&zone->server->timerdb,
 		                        (sweep_cb)knot_dname_cmp, zone->name);
