@@ -191,7 +191,9 @@ class Server(object):
         self.zonefile_load = None
         self.zonemd_verify = None
         self.zonemd_generate = None
+        self.ixfr_benevolent = None
         self.ixfr_by_one = None
+        self.ixfr_from_axfr = None
         self.journal_db_size = 20 * 1024 * 1024
         self.journal_max_usage = 5 * 1024 * 1024
         self.journal_max_depth = 100
@@ -469,6 +471,10 @@ class Server(object):
         detail_log(SEP)
         f.close()
 
+    def _asan_check(self):
+        if os.path.isfile(self.ferr) and fsearch(self.ferr, "LeakSanitizer"):
+            set_err("LeakSanitizer")
+
     def _assert_check(self):
         if os.path.isfile(self.ferr) and fsearch(self.ferr, "Assertion"):
             set_err("ASSERT")
@@ -509,6 +515,7 @@ class Server(object):
         if check:
             self._assert_check()
             self._valgrind_check()
+            self._asan_check()
 
     def kill(self):
         if Context().test.stress and self.inquirer:
@@ -1678,7 +1685,10 @@ class Knot(Server):
             self._str(s, "ddns-master", self.ddns_master)
 
             s.item_str("journal-content", z.journal_content)
-            self._str(s, "ixfr-by-one", self.ixfr_by_one)
+            self._bool(s, "ixfr-benevolent", self.ixfr_benevolent)
+            self._bool(s, "ixfr-by-one", self.ixfr_by_one)
+            self._bool(s, "ixfr-from-axfr", self.ixfr_from_axfr)
+            self._bool(s, "provide-ixfr", self.provide_ixfr)
 
             if z.reverse_from:
                 s.item_str("reverse-generate", z.reverse_from.name)
@@ -1695,7 +1705,6 @@ class Knot(Server):
             elif z.ixfr:
                 s.item_str("zonefile-load", "difference")
 
-            self._bool(s, "provide-ixfr", self.provide_ixfr)
             self._str(s, "master-pin-tolerance", self.master_pin_tol)
 
             if z.catalog_role == ZoneCatalogRole.GENERATE:

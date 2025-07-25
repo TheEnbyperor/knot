@@ -2339,7 +2339,9 @@ Definition of zones served by the server.
      journal-content: none | changes | all
      journal-max-usage: SIZE
      journal-max-depth: INT
+     ixfr-benevolent: BOOL
      ixfr-by-one: BOOL
+     ixfr-from-axfr: BOOL
      zone-max-size : SIZE
      adjust-threads: INT
      dnssec-signing: BOOL
@@ -2525,7 +2527,6 @@ Extra checks:
 - Missing glue A or AAAA record
 - Invalid DS or NSEC3PARAM record
 - CDS or CDNSKEY inconsistency
-- DS record exists at a non-delegation point (:rfc:`3658`)
 - All other DNSSEC checks executed during :ref:`zone_dnssec-validation`
 
 .. NOTE::
@@ -2618,6 +2619,16 @@ Maximum history length of the journal.
 
 *Default:* ``20``
 
+.. _zone_ixfr-benevolent:
+
+ixfr-benevolent
+---------------
+
+If enabled, incoming IXFR is applied even when it contains removals of non-existing
+or additions of existing records.
+
+*Default:* off
+
 .. _zone_ixfr-by-one:
 
 ixfr-by-one
@@ -2631,6 +2642,17 @@ as described in :ref:`journal behaviour <Journal behaviour>`.
 
 This option leads to increased server load when processing IXFR, including
 network traffic.
+
+*Default:* ``off``
+
+.. _zone_ixfr-from-axfr:
+
+ixfr-from-axfr
+--------------
+
+If a primary sends AXFR-style-IXFR upon an IXFR request, compute the difference
+and process it as an incremental zone update (e.g. by storing the changeset in
+the journal).
 
 *Default:* ``off``
 

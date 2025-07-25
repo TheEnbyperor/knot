@@ -321,7 +321,7 @@ int bind_pubkey_parse(const char *filename, dnssec_key_t **key_ptr)
 			ret = KNOT_EFILE;
 			break;
 		case ZS_FILE_ACCESS:
-			ret = KNOT_EACCES;
+			ret = KNOT_EFACCES;
 			break;
 		default:
 			ret = KNOT_EPARSEFAIL;
@@ -603,52 +603,6 @@ int keymgr_import_pkcs11(kdnssec_ctx_t *ctx, char *key_id, int argc, char *argv[
 
 	dnssec_keyid_normalize(key_id);
 	return import_key(ctx, KEYSTORE_BACKEND_PKCS11, key_id, argc, argv);
-}
-
-int keymgr_add_to_policy(kdnssec_ctx_t *ctx, char *key_id, char *policy)
-{
-
-    char *last_policy_last = NULL;
-
-    knot_dname_t *unused = NULL;
-    int ret = kasp_db_get_policy_last(ctx->kasp_db, policy, &unused, &last_policy_last);
-    knot_dname_free(unused, NULL);
-    if (ret != KNOT_EOK && ret != KNOT_ENOENT) {
-        free(last_policy_last);
-        return ret;
-    }
-
-    ret = kasp_db_set_policy_last(ctx->kasp_db, policy, last_policy_last, ctx->zone->dname, key_id);
-    free(last_policy_last);
-    if (ret != KNOT_EOK) {
-        return ret;
-    }
-
-	ret = kdnssec_ctx_commit(ctx);
-
-	return ret;
-}
-
-int keymgr_print_policy(kdnssec_ctx_t *ctx, char *policy)
-{
-    char *last_policy_last = NULL;
-    knot_dname_t *last_policy_zone = NULL;
-
-    int ret = kasp_db_get_policy_last(ctx->kasp_db, policy, &last_policy_zone, &last_policy_last);
-    if (ret != KNOT_EOK && ret != KNOT_ENOENT) {
-        free(last_policy_last);
-        free(last_policy_zone);
-        return ret;
-    }
-
-    char *name = knot_dname_to_str_alloc(last_policy_zone);
-    printf("%s, owned by %s", last_policy_last, name);
-    free(last_policy_last);
-    free(last_policy_zone);
-
-	ret = kdnssec_ctx_commit(ctx);
-
-	return ret;
 }
 
 int keymgr_nsec3_salt_print(kdnssec_ctx_t *ctx)

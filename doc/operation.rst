@@ -815,7 +815,8 @@ For the KSK side (i.e. the operator of the KSK signer), the zone has to be confi
 
   - Enabled :ref:`policy_manual`
   - Enabled :ref:`policy_offline-ksk`
-  - Optional :ref:`policy_rrsig-lifetime`, :ref:`policy_rrsig-refresh`,
+  - Explicit :ref:`policy_rrsig-refresh`
+  - Optional :ref:`policy_rrsig-lifetime`, :ref:`policy_rrsig-pre-refresh`,
     :ref:`policy_algorithm`, :ref:`policy_reproducible-signing`,
     and :ref:`policy_cds-cdnskey-publish`
   - Other options are ignored
@@ -1067,12 +1068,12 @@ The only configuration change involves redirecting
 :ref:`policy_dnskey-sync` to the common primary and adjusting its ACL to allow DDNS
 from the signers.
 
-However, this mode is not currently supported by Knot. The reason is that it results in
-IXFRs containg the DNSKEY updates back to the signers (as intended), but also with
-each signer's own keys, leading to additions of already existing records, and removals
-of non-existing ones. This would result in AXFR fallbacks. Achieving smooth operation
-without these fallbacks would require implementation of benevolent IXFR processing,
-a feature that there is little interest in.
+It is also necessary to configure :ref:`zone_ixfr-benevolent` on each signer so that
+they accept incremental zone transfers from the primary with additions (or removals)
+of their own's DNSKEYs.
+
+This setup should work nicely with any number of signers, however, due to the size
+of DNSKEY RRSet, at most three are advisable.
 
 .. _DNSSEC keys import to HSM:
 
