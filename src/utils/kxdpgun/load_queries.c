@@ -1,4 +1,4 @@
-/*  Copyright (C) 2022 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2024 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -33,7 +33,7 @@ enum qflags {
 
 struct pkt_payload *global_payloads = NULL;
 
-void free_global_payloads()
+void free_global_payloads(void)
 {
 	struct pkt_payload *g_payloads_p = global_payloads, *tmp;
 	while (g_payloads_p != NULL) {
@@ -122,7 +122,7 @@ bool load_queries(const char *filename, uint16_t edns_size, uint16_t msgid, size
 		}
 		pkt->len = pkt_len;
 		memcpy(pkt->payload, &msgid, sizeof(msgid));
-		pkt->payload[2] = 0x01; // QR bit
+		pkt->payload[2] = 0x01; // RD bit
 		pkt->payload[5] = 0x01; // 1 question
 		pkt->payload[11] = (flags & QFLAG_EDNS) ? 0x01 : 0x00;
 		memcpy(pkt->payload + 12, bufs->dname, dname_len);

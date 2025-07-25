@@ -1,4 +1,4 @@
-/*  Copyright (C) 2023 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2024 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -106,6 +106,7 @@ static const struct error errors[] = {
 	{ KNOT_EUNREACH,     "remote known to be unreachable" },
 	{ KNOT_EBADCERTKEY,  "unknown certificate key" },
 	{ KNOT_EFACCES,      "file permission denied" },
+	{ KNOT_EBACKUPDATA,  "requested data not in backup" },
 
 	{ KNOT_GENERAL_ERROR, "unknown general error" },
 
@@ -172,6 +173,7 @@ static const struct error errors[] = {
 	{ KNOT_NO_PUBLIC_KEY,         "no public key" },
 	{ KNOT_NO_PRIVATE_KEY,        "no private key" },
 	{ KNOT_NO_READY_KEY,          "no key ready for submission" },
+	{ KNOT_DNSSEC_EKEYTAG_LIMIT,  "many keys with equal keytag" },
 
 	/* Terminator */
 	{ KNOT_ERROR, NULL }

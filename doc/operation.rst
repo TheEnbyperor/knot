@@ -35,6 +35,13 @@ or to the corresponding manual page.
 Also, the server needs to create :ref:`server_rundir` and :ref:`zone_storage`
 directories in order to run properly.
 
+.. NOTE::
+
+   Avoid editing of or other manipulation with configuration file during start
+   or reload of :doc:`knotd<man_knotd>` or start of :doc:`knotc<man_knotc>`
+   and other :doc:`utilities<utilities>` which use it. There is a risk of
+   malfunction or a :ref:`crash<Bus error>` otherwise.
+
 .. _Configuration database:
 
 Configuration database
@@ -199,10 +206,10 @@ Knot DNS allows you to read or change zone contents online using the server
 control interface.
 
 .. WARNING::
-   Avoid concurrent zone access when a zone event (zone file load, refresh,
-   DNSSEC signing, dynamic update) is in progress or pending. In such a case
-   zone events must be frozen before. For more information on how to freeze the
-   zone read :ref:`Editing zone file`.
+   Avoid concurrent zone access from a third party software when a zone event
+   (zone file load, refresh, DNSSEC signing, dynamic update) is in progress or
+   pending. In such a case, zone events must be frozen before. For more
+   information on how to freeze the zone read :ref:`Editing zone file`.
 
 To get contents of all configured zones, or a specific zone contents, or zone
 records with a specific owner, or even with a specific record type::
@@ -270,9 +277,9 @@ Reading and editing the zone file safely
 ========================================
 
 It's always possible to read and edit zone contents via zone file manipulation.
-It may lead to confusion, however, if the zone contents are continuously being
-changed by DDNS, DNSSEC signing and the like. In such a case, the safe way to
-modify the zone file is to freeze zone events first::
+It may lead to confusion or even a :ref:`program crash<Bus error>`, however, if
+the zone contents are continuously being changed by DDNS, DNSSEC signing and the like.
+In such a case, the safe way to modify the zone file is to freeze zone events first::
 
     $ knotc -b zone-freeze example.com.
     $ knotc -b zone-flush example.com.
@@ -330,7 +337,7 @@ The history is stored in changesets – differences of zone contents between two
 (usually subsequent) zone versions (specified by SOA serials).
 
 Journals of all zones are stored in a common LMDB database. Huge changesets are
-split into 70 KiB [#fn-hc]_ blocks to prevent fragmentation of the DB. The
+split into 15-70 KiB [#fn-hc]_ blocks to prevent fragmentation of the DB. The
 journal does each operation in one transaction to keep consistency of the DB and performance.
 
 Each zone journal has its own occupation limits :ref:`maximum usage <zone_journal-max-usage>`
@@ -419,6 +426,9 @@ only stored in the journal.
    current SOA serial in the zone (not in the zone file) if manually updated!
    This is important to ensure consistency of the journal and outgoing IXFR.
 
+.. NOTE::
+   This mode is not suitable if the zone can be modified externally (e.g. DDNS, knotc).
+
 Example 4
 ---------
 
@@ -435,6 +445,9 @@ However, this requires setting :ref:`zone_journal-content` to `all` so that
 the information about the last real SOA serial is preserved in case of server re-start.
 The sizing of journal limits needs to be taken into consideration
 (see :ref:`Journal behaviour`).
+
+.. NOTE::
+   This mode is not suitable if the zone can be modified externally (e.g. DDNS, knotc).
 
 .. _Zone bootstrap:
 
@@ -583,8 +596,8 @@ Automatic KSK and ZSK rollovers example
 
 Let's start with the following set of keys::
 
-  2021-05-10T20:50:00+0200 info: [example.com.] DNSSEC, key, tag 50613, algorithm ECDSAP256SHA256, KSK, public, active
-  2021-05-10T20:50:00+0200 info: [example.com.] DNSSEC, key, tag 62932, algorithm ECDSAP256SHA256, public, active
+  2024-02-14T15:20:00+0100 info: [example.com.] DNSSEC, key, tag 53594, algorithm ECDSAP256SHA256, KSK, public, active
+  2024-02-14T15:20:00+0100 info: [example.com.] DNSSEC, key, tag 36185, algorithm ECDSAP256SHA256, public, active
 
 The last fields hint the key state: ``public`` denotes a key that will be presented
 as the DNSKEY record, ``ready`` means that CDS/CDNSKEY records were created,
@@ -610,115 +623,121 @@ For demonstration purposes, the following configuration is used::
 Upon the zone's KSK lifetime expiration, a new KSK is generated and the rollover
 continues along the lines of :rfc:`6781#section-4.1.2`::
 
-  # KSK Rollover (50613 -> 9081)
+  # KSK Rollover (53594 -> 3375)
 
-  2021-05-10T20:50:00+0200 info: [example.com.] DNSSEC, signing zone
-  2021-05-10T20:50:00+0200 info: [example.com.] DNSSEC, KSK rollover started
-  2021-05-10T20:50:00+0200 info: [example.com.] DNSSEC, key, tag 50613, algorithm ECDSAP256SHA256, KSK, public, active
-  2021-05-10T20:50:00+0200 info: [example.com.] DNSSEC, key, tag 62932, algorithm ECDSAP256SHA256, public, active
-  2021-05-10T20:50:00+0200 info: [example.com.] DNSSEC, key, tag  9081, algorithm ECDSAP256SHA256, KSK, public, active+
-  2021-05-10T20:50:00+0200 info: [example.com.] DNSSEC, signing started
-  2021-05-10T20:50:00+0200 info: [example.com.] DNSSEC, successfully signed
-  2021-05-10T20:50:00+0200 info: [example.com.] DNSSEC, next signing at 2021-05-10T20:50:12+0200
+  2024-02-14T15:20:00+0100 info: [example.com.] DNSSEC, signing zone
+  2024-02-14T15:20:00+0100 info: [example.com.] DNSSEC, KSK rollover started
+  2024-02-14T15:20:00+0100 info: [example.com.] DNSSEC, next key action, KSK tag 3375, submit at 2024-02-14T15:20:12+0100
+  2024-02-14T15:20:00+0100 info: [example.com.] DNSSEC, key, tag 53594, algorithm ECDSAP256SHA256, KSK, public, active
+  2024-02-14T15:20:00+0100 info: [example.com.] DNSSEC, key, tag 36185, algorithm ECDSAP256SHA256, public, active
+  2024-02-14T15:20:00+0100 info: [example.com.] DNSSEC, key, tag  3375, algorithm ECDSAP256SHA256, KSK, public, active+
+  2024-02-14T15:20:00+0100 info: [example.com.] DNSSEC, signing started
+  2024-02-14T15:20:00+0100 info: [example.com.] DNSSEC, successfully signed, serial 2010111204
+  2024-02-14T15:20:00+0100 info: [example.com.] DNSSEC, next signing at 2024-02-14T15:20:12+0100
 
   ... (propagation-delay + dnskey-ttl) ...
 
-  2021-05-10T20:50:12+0200 info: [example.com.] DNSSEC, signing zone
-  2021-05-10T20:50:12+0200 notice: [example.com.] DNSSEC, KSK submission, waiting for confirmation
-  2021-05-10T20:50:12+0200 info: [example.com.] DNSSEC, key, tag 50613, algorithm ECDSAP256SHA256, KSK, public, active
-  2021-05-10T20:50:12+0200 info: [example.com.] DNSSEC, key, tag 62932, algorithm ECDSAP256SHA256, public, active
-  2021-05-10T20:50:12+0200 info: [example.com.] DNSSEC, key, tag  9081, algorithm ECDSAP256SHA256, KSK, public, ready, active+
-  2021-05-10T20:50:12+0200 info: [example.com.] DNSSEC, signing started
-  2021-05-10T20:50:12+0200 info: [example.com.] DNSSEC, successfully signed
-  2021-05-10T20:50:12+0200 info: [example.com.] DNSSEC, next signing at 2021-05-17T20:49:56+0200
+  2024-02-14T15:20:12+0100 info: [example.com.] DNSSEC, signing zone
+  2024-02-14T15:20:12+0100 notice: [example.com.] DNSSEC, KSK submission, waiting for confirmation
+  2024-02-14T15:20:12+0100 info: [example.com.] DNSSEC, key, tag 53594, algorithm ECDSAP256SHA256, KSK, public, active
+  2024-02-14T15:20:12+0100 info: [example.com.] DNSSEC, key, tag 36185, algorithm ECDSAP256SHA256, public, active
+  2024-02-14T15:20:12+0100 info: [example.com.] DNSSEC, key, tag  3375, algorithm ECDSAP256SHA256, KSK, public, ready, active+
+  2024-02-14T15:20:12+0100 info: [example.com.] DNSSEC, signing started
+  2024-02-14T15:20:12+0100 info: [example.com.] DNSSEC, successfully signed, serial 2010111205
+  2024-02-14T15:20:12+0100 info: [example.com.] DNSSEC, next signing at 2024-02-28T15:19:37+0100
 
 At this point the new KSK has to be submitted to the parent zone. Knot detects the updated parent's DS
 record automatically (and waits for additional period of the DS's TTL before retiring the old key)
 if :ref:`parent DS check<Submission section>` is configured, otherwise the
 operator must confirm it manually (using ``knotc zone-ksk-submitted``)::
 
-  2021-05-10T20:50:12+0200 info: [example.com.] DS check, outgoing, remote 127.0.0.1@5300, KSK submission check: negative
-  2021-05-10T20:50:14+0200 info: [example.com.] DS check, outgoing, remote 127.0.0.1@5300, KSK submission check: negative
-  2021-05-10T20:50:16+0200 info: [example.com.] DS check, outgoing, remote 127.0.0.1@5300, KSK submission check: positive
-  2021-05-10T20:50:16+0200 notice: [example.com.] DNSSEC, KSK submission, confirmed
-  2021-05-10T20:50:16+0200 info: [example.com.] DNSSEC, signing zone
-  2021-05-10T20:50:16+0200 info: [example.com.] DNSSEC, key, tag 50613, algorithm ECDSAP256SHA256, KSK, public, active+
-  2021-05-10T20:50:16+0200 info: [example.com.] DNSSEC, key, tag 62932, algorithm ECDSAP256SHA256, public, active
-  2021-05-10T20:50:16+0200 info: [example.com.] DNSSEC, key, tag  9081, algorithm ECDSAP256SHA256, KSK, public, active
-  2021-05-10T20:50:16+0200 info: [example.com.] DNSSEC, signing started
-  2021-05-10T20:50:16+0200 info: [example.com.] DNSSEC, successfully signed
-  2021-05-10T20:50:16+0200 info: [example.com.] DNSSEC, next signing at 2021-05-10T20:50:23+0200
+  2024-02-14T15:20:12+0100 info: [example.com.] DS check, outgoing, remote 127.0.0.1@5300 TCP, KSK submission check: negative
+  2024-02-14T15:20:14+0100 info: [example.com.] DS check, outgoing, remote 127.0.0.1@5300 TCP/pool, KSK submission check: negative
+  2024-02-14T15:20:16+0100 info: [example.com.] DS check, outgoing, remote 127.0.0.1@5300 TCP/pool, KSK submission check: positive
+  2024-02-14T15:20:16+0100 notice: [example.com.] DNSSEC, KSK submission, confirmed
+  2024-02-14T15:20:16+0100 info: [example.com.] DNSSEC, signing zone
+  2024-02-14T15:20:16+0100 info: [example.com.] DNSSEC, key, tag 53594, algorithm ECDSAP256SHA256, KSK, public, active+
+  2024-02-14T15:20:16+0100 info: [example.com.] DNSSEC, key, tag 36185, algorithm ECDSAP256SHA256, public, active
+  2024-02-14T15:20:16+0100 info: [example.com.] DNSSEC, key, tag  3375, algorithm ECDSAP256SHA256, KSK, public, active
+  2024-02-14T15:20:16+0100 info: [example.com.] DNSSEC, signing started
+  2024-02-14T15:20:16+0100 info: [example.com.] DNSSEC, successfully signed, serial 2010111206
+  2024-02-14T15:20:16+0100 info: [example.com.] DNSSEC, next signing at 2024-02-14T15:20:23+0100
 
   ... (parent's DS TTL is 7 seconds) ...
 
-  2021-05-10T20:50:23+0200 info: [example.com.] DNSSEC, signing zone
-  2021-05-10T20:50:23+0200 info: [example.com.] DNSSEC, key, tag 62932, algorithm ECDSAP256SHA256, public, active
-  2021-05-10T20:50:23+0200 info: [example.com.] DNSSEC, key, tag  9081, algorithm ECDSAP256SHA256, KSK, public, active
-  2021-05-10T20:50:23+0200 info: [example.com.] DNSSEC, signing started
-  2021-05-10T20:50:23+0200 info: [example.com.] DNSSEC, successfully signed
-  2021-05-10T20:50:23+0200 info: [example.com.] DNSSEC, next signing at 2021-05-10T20:51:56+0200
+  2024-02-14T15:20:23+0100 info: [example.com.] DNSSEC, signing zone
+  2024-02-14T15:20:23+0100 info: [example.com.] DNSSEC, next key action, ZSK, generate at 2024-02-14T15:21:54+0100
+  2024-02-14T15:20:23+0100 info: [example.com.] DNSSEC, key, tag 36185, algorithm ECDSAP256SHA256, public, active
+  2024-02-14T15:20:23+0100 info: [example.com.] DNSSEC, key, tag  3375, algorithm ECDSAP256SHA256, KSK, public, active
+  2024-02-14T15:20:23+0100 info: [example.com.] DNSSEC, signing started
+  2024-02-14T15:20:23+0100 info: [example.com.] DNSSEC, successfully signed, serial 2010111207
+  2024-02-14T15:20:23+0100 info: [example.com.] DNSSEC, next signing at 2024-02-14T15:21:54+0100
 
 Upon the zone's ZSK lifetime expiration, a new ZSK is generated and the rollover
 continues along the lines of :rfc:`6781#section-4.1.1`::
 
-  # ZSK Rollover (62932 -> 33255)
+  # ZSK Rollover (36185 -> 38559)
 
-  2021-05-10T20:51:56+0200 info: [example.com.] DNSSEC, signing zone
-  2021-05-10T20:51:56+0200 info: [example.com.] DNSSEC, ZSK rollover started
-  2021-05-10T20:51:56+0200 info: [example.com.] DNSSEC, key, tag 62932, algorithm ECDSAP256SHA256, public, active
-  2021-05-10T20:51:56+0200 info: [example.com.] DNSSEC, key, tag  9081, algorithm ECDSAP256SHA256, KSK, public, active
-  2021-05-10T20:51:56+0200 info: [example.com.] DNSSEC, key, tag 33255, algorithm ECDSAP256SHA256, public
-  2021-05-10T20:51:56+0200 info: [example.com.] DNSSEC, signing started
-  2021-05-10T20:51:56+0200 info: [example.com.] DNSSEC, successfully signed
-  2021-05-10T20:51:56+0200 info: [example.com.] DNSSEC, next signing at 2021-05-10T20:52:08+0200
+  2024-02-14T15:21:54+0100 info: [example.com.] DNSSEC, signing zone
+  2024-02-14T15:21:54+0100 info: [example.com.] DNSSEC, ZSK rollover started
+  2024-02-14T15:21:54+0100 info: [example.com.] DNSSEC, next key action, ZSK tag 38559, replace at 2024-02-14T15:22:06+0100
+  2024-02-14T15:21:54+0100 info: [example.com.] DNSSEC, key, tag 36185, algorithm ECDSAP256SHA256, public, active
+  2024-02-14T15:21:54+0100 info: [example.com.] DNSSEC, key, tag  3375, algorithm ECDSAP256SHA256, KSK, public, active
+  2024-02-14T15:21:54+0100 info: [example.com.] DNSSEC, key, tag 38559, algorithm ECDSAP256SHA256, public
+  2024-02-14T15:21:54+0100 info: [example.com.] DNSSEC, signing started
+  2024-02-14T15:21:54+0100 info: [example.com.] DNSSEC, successfully signed, serial 2010111208
+  2024-02-14T15:21:54+0100 info: [example.com.] DNSSEC, next signing at 2024-02-14T15:22:06+0100
 
   ... (propagation-delay + dnskey-ttl) ...
 
-  2021-05-10T20:52:08+0200 info: [example.com.] DNSSEC, signing zone
-  2021-05-10T20:52:08+0200 info: [example.com.] DNSSEC, key, tag 62932, algorithm ECDSAP256SHA256, public
-  2021-05-10T20:52:08+0200 info: [example.com.] DNSSEC, key, tag  9081, algorithm ECDSAP256SHA256, KSK, public, active
-  2021-05-10T20:52:08+0200 info: [example.com.] DNSSEC, key, tag 33255, algorithm ECDSAP256SHA256, public, active
-  2021-05-10T20:52:08+0200 info: [example.com.] DNSSEC, signing started
-  2021-05-10T20:52:08+0200 info: [example.com.] DNSSEC, successfully signed
-  2021-05-10T20:52:08+0200 info: [example.com.] DNSSEC, next signing at 2021-05-10T20:52:25+0200
+  2024-02-14T15:22:06+0100 info: [example.com.] DNSSEC, signing zone
+  2024-02-14T15:22:06+0100 info: [example.com.] DNSSEC, next key action, ZSK tag 36185, remove at 2024-02-14T15:22:23+0100
+  2024-02-14T15:22:06+0100 info: [example.com.] DNSSEC, key, tag 36185, algorithm ECDSAP256SHA256, public
+  2024-02-14T15:22:06+0100 info: [example.com.] DNSSEC, key, tag  3375, algorithm ECDSAP256SHA256, KSK, public, active
+  2024-02-14T15:22:06+0100 info: [example.com.] DNSSEC, key, tag 38559, algorithm ECDSAP256SHA256, public, active
+  2024-02-14T15:22:06+0100 info: [example.com.] DNSSEC, signing started
+  2024-02-14T15:22:06+0100 info: [example.com.] DNSSEC, successfully signed, serial 2010111209
+  2024-02-14T15:22:06+0100 info: [example.com.] DNSSEC, next signing at 2024-02-14T15:22:23+0100
 
   ... (propagation-delay + zone-max-ttl) ...
 
-  2021-05-10T20:52:25+0200 info: [example.com.] DNSSEC, signing zone
-  2021-05-10T20:52:25+0200 info: [example.com.] DNSSEC, key, tag  9081, algorithm ECDSAP256SHA256, KSK, public, active
-  2021-05-10T20:52:25+0200 info: [example.com.] DNSSEC, key, tag 33255, algorithm ECDSAP256SHA256, public, active
-  2021-05-10T20:52:25+0200 info: [example.com.] DNSSEC, signing started
-  2021-05-10T20:52:25+0200 info: [example.com.] DNSSEC, successfully signed
-  2021-05-10T20:52:25+0200 info: [example.com.] DNSSEC, next signing at 2021-05-10T20:54:08+0200
-  2021-05-10T20:54:08+0200 info: [example.com.] DNSSEC, signing zone
+  2024-02-14T15:22:23+0100 info: [example.com.] DNSSEC, signing zone
+  2024-02-14T15:22:23+0100 info: [example.com.] DNSSEC, next key action, ZSK, generate at 2024-02-14T15:24:06+0100
+  2024-02-14T15:22:23+0100 info: [example.com.] DNSSEC, key, tag  3375, algorithm ECDSAP256SHA256, KSK, public, active
+  2024-02-14T15:22:23+0100 info: [example.com.] DNSSEC, key, tag 38559, algorithm ECDSAP256SHA256, public, active
+  2024-02-14T15:22:23+0100 info: [example.com.] DNSSEC, signing started
+  2024-02-14T15:22:23+0100 info: [example.com.] DNSSEC, successfully signed, serial 2010111210
+  2024-02-14T15:22:23+0100 info: [example.com.] DNSSEC, next signing at 2024-02-14T15:24:06+0100
 
 Further rollovers::
 
   ... (zsk-lifetime - propagation-delay - zone-max-ttl) ...
 
-  # Another ZSK Rollover (33255 -> 49526)
+  # Another ZSK Rollover (38559 -> 59825)
 
-  2021-05-10T20:54:08+0200 info: [example.com.] DNSSEC, signing zone
-  2021-05-10T20:54:08+0200 info: [example.com.] DNSSEC, ZSK rollover started
-  2021-05-10T20:54:08+0200 info: [example.com.] DNSSEC, key, tag  9081, algorithm ECDSAP256SHA256, KSK, public, active
-  2021-05-10T20:54:08+0200 info: [example.com.] DNSSEC, key, tag 33255, algorithm ECDSAP256SHA256, public, active
-  2021-05-10T20:54:08+0200 info: [example.com.] DNSSEC, key, tag 49526, algorithm ECDSAP256SHA256, public
-  2021-05-10T20:54:08+0200 info: [example.com.] DNSSEC, signing started
-  2021-05-10T20:54:08+0200 info: [example.com.] DNSSEC, successfully signed
-  2021-05-10T20:54:08+0200 info: [example.com.] DNSSEC, next signing at 2021-05-10T20:54:20+0200
+  2024-02-14T15:24:06+0100 info: [example.com.] DNSSEC, signing zone
+  2024-02-14T15:24:06+0100 info: [example.com.] DNSSEC, ZSK rollover started
+  2024-02-14T15:24:06+0100 info: [example.com.] DNSSEC, next key action, ZSK tag 59825, replace at 2024-02-14T15:24:18+0100
+  2024-02-14T15:24:06+0100 info: [example.com.] DNSSEC, key, tag  3375, algorithm ECDSAP256SHA256, KSK, public, active
+  2024-02-14T15:24:06+0100 info: [example.com.] DNSSEC, key, tag 38559, algorithm ECDSAP256SHA256, public, active
+  2024-02-14T15:24:06+0100 info: [example.com.] DNSSEC, key, tag 59825, algorithm ECDSAP256SHA256, public
+  2024-02-14T15:24:06+0100 info: [example.com.] DNSSEC, signing started
+  2024-02-14T15:24:06+0100 info: [example.com.] DNSSEC, successfully signed, serial 2010111211
+  2024-02-14T15:24:06+0100 info: [example.com.] DNSSEC, next signing at 2024-02-14T15:24:18+0100
 
   ...
 
-  # Another KSK Rollover (9081 -> 9179)
+  # Another KSK Rollover (3375 -> 50822)
 
-  2021-05-10T20:55:00+0200 info: [example.com.] DNSSEC, signing zone
-  2021-05-10T20:55:00+0200 info: [example.com.] DNSSEC, KSK rollover started
-  2021-05-10T20:55:00+0200 info: [example.com.] DNSSEC, key, tag  9081, algorithm ECDSAP256SHA256, KSK, public, active
-  2021-05-10T20:55:00+0200 info: [example.com.] DNSSEC, key, tag 49526, algorithm ECDSAP256SHA256, public, active
-  2021-05-10T20:55:00+0200 info: [example.com.] DNSSEC, key, tag  9179, algorithm ECDSAP256SHA256, KSK, public, active+
-  2021-05-10T20:55:00+0200 info: [example.com.] DNSSEC, signing started
-  2021-05-10T20:55:00+0200 info: [example.com.] DNSSEC, successfully signed
-  2021-05-10T20:55:00+0200 info: [example.com.] DNSSEC, next signing at 2021-05-10T20:55:12+0200
+  2024-02-14T15:25:00+0100 info: [example.com.] DNSSEC, signing zone
+  2024-02-14T15:25:00+0100 info: [example.com.] DNSSEC, KSK rollover started
+  2024-02-14T15:25:00+0100 info: [example.com.] DNSSEC, next key action, KSK tag 50822, submit at 2024-02-14T15:25:12+0100
+  2024-02-14T15:25:00+0100 info: [example.com.] DNSSEC, key, tag  3375, algorithm ECDSAP256SHA256, KSK, public, active
+  2024-02-14T15:25:00+0100 info: [example.com.] DNSSEC, key, tag 59825, algorithm ECDSAP256SHA256, public, active
+  2024-02-14T15:25:00+0100 info: [example.com.] DNSSEC, key, tag 50822, algorithm ECDSAP256SHA256, KSK, public, active+
+  2024-02-14T15:25:00+0100 info: [example.com.] DNSSEC, signing started
+  2024-02-14T15:25:00+0100 info: [example.com.] DNSSEC, successfully signed, serial 2010111214
+  2024-02-14T15:25:00+0100 info: [example.com.] DNSSEC, next signing at 2024-02-14T15:25:12+0100
 
   ...
 
@@ -1360,6 +1379,7 @@ Pre-requisites
 
     ethtool -K <interface> tx-vlan-offload off rx-vlan-offload off
 
+.. _Mode XDP_optimizations:
 
 Optimizations
 -------------
@@ -1371,6 +1391,8 @@ Some helpful commands::
  ethtool -L <interface> combined <?>
  ethtool -G <interface> rx <?> tx <?>
  renice -n 19 -p $(pgrep '^ksoftirqd/[0-9]*$')
+
+.. _Mode XDP_limitations:
 
 Limitations
 -----------

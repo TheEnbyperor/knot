@@ -1,4 +1,4 @@
-/*  Copyright (C) 2022 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2024 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -90,6 +90,39 @@ static knot_kasp_key_t *key_get_by_id(kdnssec_ctx_t *ctx, const char *keyid)
 		}
 	}
 	return NULL;
+}
+
+static int clear_future_timer(knot_time_t *timer, knot_time_t now)
+{
+	if (*timer > now) { // includes the fact that *timer != 0
+		*timer = 0;
+		return 1;
+	}
+	return 0;
+}
+
+// this is intended for automatic key management with keys imported from Bind
+static void clear_future_timers(knot_kasp_key_t *key, kdnssec_ctx_t *ctx)
+{
+	int change = 0;
+	// untouched timer created, as it should be never in the future
+	change += clear_future_timer(&key->timing.pre_active, ctx->now);
+	change += clear_future_timer(&key->timing.publish, ctx->now);
+	change += clear_future_timer(&key->timing.ready, ctx->now);
+	change += clear_future_timer(&key->timing.active, ctx->now);
+	change += clear_future_timer(&key->timing.retire_active, ctx->now);
+	if (key->timing.retire_active == 0) { // otherwise those timers are in the future normally
+		change += clear_future_timer(&key->timing.retire, ctx->now);
+		change += clear_future_timer(&key->timing.remove, ctx->now);
+	}
+	// untouched timer post_active, as it's normally in the future and it's not importable from Bind anyway
+	// untouched timer revoke as that is another topic
+
+	if (change > 0) {
+		log_zone_notice(ctx->zone->dname , "DNSSEC, cleared future timers of auto-managed key %hu",
+		                dnssec_key_get_keytag(key->key));
+		(void)kdnssec_ctx_commit(ctx);
+	}
 }
 
 static int generate_key(kdnssec_ctx_t *ctx, kdnssec_generate_flags_t flags,
@@ -260,7 +293,8 @@ typedef enum {
 
 typedef struct {
 	roll_action_type_t type;
-	bool ksk;
+	bool ksk; // These flags seem redundant, but are needed to avoid ASAN
+	bool zsk; // heap-use-after-free if the key is accessed directly during key generation.
 	knot_time_t time;
 	knot_kasp_key_t *key;
 	uint16_t ready_keytag;
@@ -395,6 +429,7 @@ static roll_action_t next_action(kdnssec_ctx_t *ctx, zone_sign_roll_flags_t flag
 		    (key->is_zsk && !(flags & KEY_ROLL_ALLOW_ZSK_ROLL))) {
 			continue;
 		}
+		clear_future_timers(key, ctx);
 		if (key->is_ksk) {
 			switch (get_key_state(key, ctx->now)) {
 			case DNSSEC_KEY_STATE_PRE_ACTIVE:
@@ -491,6 +526,7 @@ static roll_action_t next_action(kdnssec_ctx_t *ctx, zone_sign_roll_flags_t flag
 		if (knot_time_cmp(keytime, res.time) < 0) {
 			res.key = key;
 			res.ksk = key->is_ksk;
+			res.zsk = key->is_zsk;
 			res.time = keytime;
 			res.type = restype;
 		}
@@ -643,6 +679,28 @@ static int exec_really_remove(kdnssec_ctx_t *ctx, knot_kasp_key_t *key)
 	assert(get_key_state(key, ctx->now) == DNSSEC_KEY_STATE_REMOVED);
 	assert(!ctx->keep_deleted_keys);
 	return kdnssec_delete_key(ctx, key);
+}
+
+static void log_next_event(kdnssec_ctx_t *ctx, roll_action_t *next)
+{
+	char time_str[64] = "";
+	struct tm time_gm = { 0 };
+	time_t nt = next->time;
+	localtime_r(&nt, &time_gm);
+	strftime(time_str, sizeof(time_str), KNOT_LOG_TIME_FORMAT, &time_gm);
+
+	if (next->type == GENERATE) {
+		const char *key_type = ctx->policy->single_type_signing ?
+			"CSK" : (next->ksk ? "KSK" : "ZSK");
+		log_zone_info(ctx->zone->dname, "DNSSEC, next key action, %s, generate at %s",
+		              key_type, time_str);
+	} else {
+		const char *key_type = next->ksk ?
+			(next->zsk ? "CSK" : "KSK") : "ZSK";
+		log_zone_info(ctx->zone->dname, "DNSSEC, next key action, %s tag %hu, %s at %s",
+		              key_type, dnssec_key_get_keytag(next->key->key),
+		              roll_action_name(next->type), time_str);
+	}
 }
 
 int knot_dnssec_key_rollover(kdnssec_ctx_t *ctx, zone_sign_roll_flags_t flags,
@@ -812,6 +870,10 @@ int knot_dnssec_key_rollover(kdnssec_ctx_t *ctx, zone_sign_roll_flags_t flags,
 
 	if (ret == KNOT_EOK && knot_time_cmp(reschedule->next_rollover, ctx->now) <= 0) {
 		return knot_dnssec_key_rollover(ctx, flags, reschedule);
+	}
+
+	if (ret == KNOT_EOK && next.time > 0) {
+		log_next_event(ctx, &next);
 	}
 
 	if (ret == KNOT_EOK && reschedule->keys_changed) {

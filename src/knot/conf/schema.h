@@ -1,4 +1,4 @@
-/*  Copyright (C) 2023 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2024 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -43,6 +43,7 @@
 #define C_CERT_FILE		"\x09""cert-file"
 #define C_CERT_KEY		"\x08""cert-key"
 #define C_CHK_INTERVAL		"\x0E""check-interval"
+#define C_CLEAR			"\x05""clear"
 #define C_COMMENT		"\x07""comment"
 #define C_CONFIG		"\x06""config"
 #define C_CTL			"\x07""control"
@@ -62,6 +63,7 @@
 #define C_ECS			"\x12""edns-client-subnet"
 #define C_EXPIRE_MAX_INTERVAL	"\x13""expire-max-interval"
 #define C_EXPIRE_MIN_INTERVAL	"\x13""expire-min-interval"
+#define C_EXTRA_FRAMES		"\x0C""extra-frames"
 #define C_FILE			"\x04""file"
 #define C_GLOBAL_MODULE		"\x0D""global-module"
 #define C_ID			"\x02""id"

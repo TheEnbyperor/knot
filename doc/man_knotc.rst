@@ -142,12 +142,13 @@ Actions
   together with keys (or keys without the KASP database), zone's catalog,
   and the server QUIC key and certificate, respectively, are backed up,
   or omitted from the backup. By default, filters **+zonefile**, **+timers**,
-  **+kaspdb**, **+nokeysonly**, **+catalog**, **+nojournal**, and **+noquic**
-  are set.  Setting a filter for an item doesn't change default settings for
-  other items. If zone flushing is disabled, the original zone file is backed
-  up instead of writing out zone contents to a file. When backing-up a catalog
-  zone, it is recommended to prevent ongoing changes to it by use of
-  **zone-freeze**.
+  **+kaspdb**, **+nokeysonly**, **+catalog**, **+quic**, and **+nojournal**
+  are set for backup. The same defaults are set for restore, with the only
+  difference being **+noquic**. Setting a filter for an item doesn't change
+  default settings for other items. If zone flushing is disabled, the original
+  zone file is backed up instead of writing out zone contents to a file.
+  When backing-up a catalog zone, it is recommended to prevent ongoing changes
+  to it by use of **zone-freeze**.
   See :ref:`Notes<notes>` below about the directory permissions. (#)
 
 **zone-restore** [*zone*...] **+backupdir** *directory* [*filter*...]
@@ -239,10 +240,12 @@ Actions
 **conf-check**
   Check the server configuration. (*)
 
-**conf-import** *filename*
+**conf-import** *filename* [+nopurge]
   Import a configuration file into the configuration database. If the database
   doesn't exist yet, execute this command as an intended user to ensure the server
   is permitted to access the database (e.g. *sudo -u knot knotc conf-import ...*).
+  An optional filter **+nopurge** prevents possibly existing configuration
+  database from purging before the import itself.
   Also ensure the server is not using the configuration database at the same time! (*)
 
 **conf-export** [*filename*]

@@ -32,9 +32,10 @@ the following symbols:
 - ``|`` – Choice
 
 The configuration consists of several fixed sections and optional module
-sections. There are 16 fixed sections (``module``, ``server``, ``xdp``, ``control``,
+sections. There are 17 fixed sections (``module``, ``server``, ``xdp``, ``control``,
 ``log``, ``statistics``, ``database``, ``keystore``, ``key``, ``remote``,
-``remotes``, ``acl``, ``submission``, ``policy``, ``template``, ``zone``).
+``remotes``, ``acl``, ``submission``, ``dnskey-sync``, ``policy``, ``template``,
+``zone``).
 Module sections are prefixed with the ``mod-`` prefix (e.g. ``mod-stats``).
 
 Most of the sections (e.g. ``zone``) are sequences of settings blocks. Each
@@ -91,6 +92,44 @@ at the place of the include option position in the configuration.
 If the path is not absolute, then it is considered to be relative to the
 current file. The pattern can be an arbitrary string meeting POSIX *glob*
 requirements, e.g. dir/\*.conf. Matching files are processed in sorted order.
+
+*Default:* not set
+
+.. _clearing configuration sections:
+
+Clearing configuration sections
+===============================
+
+It's possible to clear specified configuration sections at given phases
+of the configuration parsing.
+
+::
+
+ clear: STR
+
+.. _clear:
+
+clear
+-----
+
+A matching pattern specifying configuration sections that are cleared when
+this item is parsed. This allows overriding of existing configuration
+in the configuration database when including a configuration file or
+ensures that some configuration wasn't specified in previous includes.
+
+.. NOTE::
+   For the pattern matching the POSIX function
+   `fnmatch() <https://pubs.opengroup.org/onlinepubs/9699919799/functions/fnmatch.html>`_
+   is used. On Linux, the GNU extension
+   `FNM_EXTMATCH <https://www.gnu.org/software/libc/manual/html_node/Wildcard-Matching.html#index-FNM_005fEXTMATCH>`_
+   is enabled, which allows extended pattern matching.
+   Examples:
+
+   - ``clear: zone`` – Clears the ``zone`` section.
+   - ``clear: mod-*`` – Clears all module sections.
+   - ``clear: "[!z]*"`` – Clears all sections not beginning with letter ``z``.
+   - ``clear: !(zone)`` – (GNU only) Clears all sections except the ``zone`` one.
+   - ``clear: @(zone|template)`` – (GNU only) Clears the ``zone`` and ``template`` sections.
 
 *Default:* not set
 
@@ -1007,8 +1046,8 @@ Minimum severity level for all message types, except ``quic``, to be logged.
 
 .. _stats section:
 
-``stats`` section
-=================
+``statistics`` section
+======================
 
 Periodic server statistics dumping.
 
@@ -1977,7 +2016,7 @@ Declare (override) maximal TTL value among all the records in zone.
 ksk-lifetime
 ------------
 
-A period between KSK activation and the next rollover initiation.
+A period between KSK generation and the next rollover initiation.
 
 .. NOTE::
    KSK key lifetime is also influenced by propagation-delay, dnskey-ttl,
@@ -2001,7 +2040,8 @@ A period between ZSK activation and the next rollover initiation.
    and after this, a new ZSK is generated to replace it within
    following roll-over.
 
-   ZSK key lifetime is also influenced by propagation-delay and dnskey-ttl
+   As a consequence, in normal operation, this results in the period
+   of ZSK generation being `zsk-lifetime + propagation-delay + dnskey_ttl`.
 
    Zero (aka infinity) value causes no ZSK rollover as a result.
 
@@ -2187,6 +2227,10 @@ It's possible to manage both child and parent zones by the same Knot DNS server.
 
 .. NOTE::
    Module :ref:`Onlinesign<mod-onlinesign>` doesn't support DS push.
+
+.. NOTE::
+   When turning this feature on while a KSK roll-over is already running, it might
+   not take effect for the already-running roll-over.
 
 *Default:* not set
 
@@ -2742,6 +2786,7 @@ is cancelled with an error, and either none or previous zone state is published.
 List of DNSSEC checks:
 
 - Every zone RRSet is correctly signed by at least one present DNSKEY.
+- For every RRSIG there are at most 3 non-matching DNSKEYs with the same keytag.
 - DNSKEY RRSet is signed by KSK.
 - NSEC(3) RR exists for each name (unless opt-out) with correct bitmap.
 - Every NSEC(3) RR is linked to the lexicographically next one.
