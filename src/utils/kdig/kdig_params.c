@@ -1272,6 +1272,27 @@ static int opt_noedns(const char *arg, void *query)
 	return KNOT_EOK;
 }
 
+static int opt_msgdelay(const char *arg, void *query)
+{
+	query_t *q = query;
+
+	if (str_to_u32(arg, &q->msgdelay) != KNOT_EOK) {
+		ERR("invalid +msgdelay=%s", arg);
+		return KNOT_EINVAL;
+	}
+
+	return KNOT_EOK;
+}
+
+static int opt_nomsgdelay(const char *arg, void *query)
+{
+	query_t *q = query;
+
+	q->msgdelay = 0;
+
+	return KNOT_EOK;
+}
+
 static int opt_timeout(const char *arg, void *query)
 {
 	query_t *q = query;
@@ -1655,6 +1676,9 @@ static const param_t kdig_opts2[] = {
 
 	{ "edns",           ARG_OPTIONAL, opt_edns },
 	{ "noedns",         ARG_NONE,     opt_noedns },
+
+	{ "msgdelay",       ARG_REQUIRED, opt_msgdelay },
+	{ "nomsgdelay",     ARG_NONE,     opt_nomsgdelay },
 
 	{ "timeout",        ARG_REQUIRED, opt_timeout },
 	{ "notimeout",      ARG_NONE,     opt_notimeout },
@@ -2348,7 +2372,7 @@ void complete_queries(list_t *queries, const query_t *conf)
 
 static void print_help(void)
 {
-	printf("Usage: %s [-4] [-6] [-d] [-b address] [-c class] [-p port]\n"
+	printf("Usage: %s [-4] [-6] [-d[d]] [-b address] [-c class] [-p port]\n"
 	       "            [-q name] [-t type] [-x address] [-k keyfile]\n"
 	       "            [-y [algo:]keyname:key] [-E tapfile] [-G tapfile]\n"
 	       "            name [type] [class] [@server]\n"
@@ -2411,6 +2435,7 @@ static void print_help(void)
 	       "       +[no]alignment[=N]         Pad with EDNS(0) to blocksize (%u or specify size).\n"
 	       "       +[no]subnet=SUBN           Set EDNS(0) client subnet addr/prefix.\n"
 	       "       +[no]edns[=N]              Use EDNS(=version).\n"
+	       "       +[no]msgdelay=T            Wait this ms before receiving each XFR message.\n"
 	       "       +[no]timeout=T             Set wait for reply interval in seconds.\n"
 	       "       +[no]retry=N               Set number of retries.\n"
 	       "       +[no]expire                Set the EXPIRE EDNS option.\n"
@@ -2477,7 +2502,7 @@ static int parse_opt1(const char *opt, const char *value, kdig_params_t *params,
 		*index += add;
 		break;
 	case 'd':
-		msg_enable_debug(1);
+		msg_enable_debug(len);
 		break;
 	case 'h':
 		if (len > 1) {

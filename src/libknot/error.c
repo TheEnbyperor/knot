@@ -37,7 +37,7 @@ static const struct error errors[] = {
 	{ KNOT_EINVAL,        "invalid parameter" },
 	{ KNOT_ENOTSUP,       "operation not supported" },
 	{ KNOT_EBUSY,         "requested resource is busy" },
-	{ KNOT_EAGAIN,        "OS lacked necessary resources" },
+	{ KNOT_EAGAIN,        "temporarily out of resources" },
 	{ KNOT_ENOBUFS,       "no buffers" },
 	{ KNOT_EMFILE,        "too many open files" },
 	{ KNOT_ENFILE,        "too many open files in system" },
@@ -180,6 +180,10 @@ static const struct error errors[] = {
 	{ KNOT_ESOON_EXPIRE,          "oncoming RRSIG expiration" },
 	{ KNOT_DNSSEC_EKEYTAG_LIMIT,  "many keys with equal keytag" },
 	{ KNOT_DNSSEC_EXTRA_NSEC,     "superfluous NSEC(3)" },
+
+	/* Added errors, TODO refactor in next major version. */
+	{ KNOT_NET_EAGAIN,   "try network operation again" },
+	{ KNOT_ETRYAGAIN,     "try again later" },
 
 	/* Terminator */
 	{ KNOT_ERROR, NULL }

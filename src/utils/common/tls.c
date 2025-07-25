@@ -318,12 +318,25 @@ static int check_certificates(gnutls_session_t session, const list_t *pins)
 		}
 
 		gnutls_datum_t cert_name = { 0 };
-		ret = gnutls_x509_crt_get_dn2(cert, &cert_name);
+		(void)gnutls_x509_crt_get_dn3(cert, &cert_name, 0);
+		DBG(" #%i, %s", i + 1, (char *)cert_name.data ?: "<SUBJECT NOT PRESENT>");
+		gnutls_free(cert_name.data);
+
+		ret = gnutls_x509_crt_print(cert, GNUTLS_CRT_PRINT_UNSIGNED_FULL, &cert_name);
 		if (ret != GNUTLS_E_SUCCESS) {
 			gnutls_x509_crt_deinit(cert);
 			return ret;
 		}
-		DBG(" #%i, %s", i + 1, cert_name.data);
+		char *altname = strstr((char *)cert_name.data, "Subject Alternative Name");
+		if (altname != NULL) {
+			DBG2("     Subject Alternative Name:");
+			const char *line = strstr(altname, "\n") + 1;
+			while (!strncmp("\t\t\t", line, 3)) {
+				const char *end = strstr((line += 3), "\n");
+				DBG2("       %.*s", (int)(end - line), line);
+				line = end + 1;
+			}
+		}
 		gnutls_free(cert_name.data);
 
 		uint8_t cert_pin[CERT_PIN_LEN] = { 0 };
@@ -733,5 +746,8 @@ void print_tls(const tls_ctx_t *ctx)
 
 	char *msg = gnutls_session_get_desc(ctx->session);
 	printf(";; TLS session %s\n", msg);
+	if (strstr(msg, "TLS1.2") != NULL) {
+		WARN("TLS 1.2 not supported by Knot DNS server");
+	}
 	gnutls_free(msg);
 }

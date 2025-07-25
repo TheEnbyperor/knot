@@ -305,11 +305,11 @@ ngtcp2_ssize ngtcp2_pkt_decode_hd_long(ngtcp2_pkt_hd *dest, const uint8_t *pkt,
     }
 
     ngtcp2_get_uvarint(&vi, p);
-#if SIZE_MAX > UINT32_MAX
+#if SIZE_MAX < UINT64_MAX
     if (vi > SIZE_MAX) {
       return NGTCP2_ERR_INVALID_ARGUMENT;
     }
-#endif /* SIZE_MAX > UINT32_MAX */
+#endif /* SIZE_MAX < UINT64_MAX */
 
     longlen = (size_t)vi;
   }
@@ -2081,8 +2081,10 @@ ngtcp2_ssize ngtcp2_pkt_encode_datagram_frame(uint8_t *out, size_t outlen,
   }
 
   for (i = 0; i < fr->datacnt; ++i) {
-    assert(fr->data[i].len);
-    assert(fr->data[i].base);
+    if (fr->data[i].len == 0) {
+      continue;
+    }
+
     p = ngtcp2_cpymem(p, fr->data[i].base, fr->data[i].len);
   }
 
@@ -2422,9 +2424,7 @@ size_t ngtcp2_pkt_stream_max_datalen(int64_t stream_id, uint64_t offset,
   left -= n;
 
   if (left > 8 + 1073741823 && len > 1073741823) {
-#if SIZE_MAX > UINT32_MAX
     len = ngtcp2_min_uint64(len, 4611686018427387903lu);
-#endif /* SIZE_MAX > UINT32_MAX */
     return (size_t)ngtcp2_min_uint64(len, (uint64_t)(left - 8));
   }
 
@@ -2454,9 +2454,9 @@ size_t ngtcp2_pkt_crypto_max_datalen(uint64_t offset, size_t len, size_t left) {
   left -= n;
 
   if (left > 8 + 1073741823 && len > 1073741823) {
-#if SIZE_MAX > UINT32_MAX
+#if SIZE_MAX == UINT64_MAX
     len = ngtcp2_min_size(len, 4611686018427387903lu);
-#endif /* SIZE_MAX > UINT32_MAX */
+#endif /* SIZE_MAX == UINT64_MAX */
     return ngtcp2_min_size(len, left - 8);
   }
 

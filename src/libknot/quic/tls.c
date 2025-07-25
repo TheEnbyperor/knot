@@ -52,7 +52,7 @@ knot_tls_ctx_t *knot_tls_ctx_new(struct knot_creds *creds, unsigned io_timeout,
 	res->io_timeout = io_timeout;
 	res->server = server;
 
-	int ret = gnutls_priority_init2(&res->priority, KNOT_TLS_PRIORITIES, NULL,
+	int ret = gnutls_priority_init2(&res->priority, knot_tls_priority(false), NULL,
 	                                GNUTLS_PRIORITY_INIT_DEF_APPEND);
 	if (ret != GNUTLS_E_SUCCESS) {
 		free(res);
@@ -170,7 +170,7 @@ int knot_tls_handshake(knot_tls_conn_t *conn, bool oneshot)
 	};
 	int ret = poll(&pfd, 1, conn->ctx->io_timeout);
 	if (ret != 1) {
-		return ret == 0 ? KNOT_NET_ECONNECT : KNOT_EAGAIN;
+		return ret == 0 ? KNOT_NET_ECONNECT : KNOT_NET_EAGAIN;
 	}
 
 	gnutls_record_set_timeout(conn->session, conn->ctx->io_timeout);
@@ -186,7 +186,7 @@ int knot_tls_handshake(knot_tls_conn_t *conn, bool oneshot)
 		return KNOT_NET_ETIMEOUT;
 	default:
 		if (gnutls_error_is_fatal(ret) == 0) {
-			return KNOT_EAGAIN;
+			return KNOT_NET_EAGAIN;
 		} else {
 			return KNOT_NET_EHSHAKE;
 		}

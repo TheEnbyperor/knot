@@ -653,8 +653,8 @@ Possible values:
   a ready KSK present when the zone is signed; the signal parameters are
   `zone name`, `KSK keytag`, and `KSK KASP id`.
 - ``dnssec-invalid`` – The signal ``zone_dnssec_invalid`` is emitted when DNSSEC
-  validation fails; the signal parameters are `zone name`, and `remaining seconds`
-  until an RRSIG expires.
+  validation fails, or when ZONEMD verification fails; the signal parameters
+  are `zone name`, and `remaining seconds` until an RRSIG expires.
 
 .. NOTE::
    This function requires systemd version at least 221 or libdbus.
@@ -1554,7 +1554,7 @@ cert-key
 --------
 
 An ordered list of remote certificate public key PINs. If the list is non-empty,
-communication with the remote is possible only via QUIC protocol and
+communication with the remote is possible only via QUIC or TLS protocols and
 a peer certificate is required. The peer certificate key must match one of the
 specified PINs.
 
@@ -1701,7 +1701,7 @@ cert-key
 --------
 
 An ordered list of remote certificate public key PINs. If the list is non-empty,
-communication with the remote is possible only via QUIC protocol and
+communication with the remote is possible only via QUIC or TLS protocols and
 a peer certificate is required. The peer certificate key must match one of the
 specified PINs.
 
@@ -2533,6 +2533,7 @@ Definition of zones served by the server.
      master: remote_id | remotes_id ...
      ddns-master: remote_id
      notify: remote_id | remotes_id ...
+     notify-delay: TIME
      acl: acl_id ...
      master-pin-tolerance: TIME
      provide-ixfr: BOOL
@@ -2655,11 +2656,22 @@ notify
 ------
 
 An ordered list of references :ref:`remote<remote_id>` and
-:ref:`remotes<remotes_id>` to secondary servers to which notify
+:ref:`remotes<remotes_id>` to secondary servers to which NOTIFY
 message is sent if the zone changes.
 Empty value is allowed for template value overriding.
 
 *Default:* not set
+
+.. _zone_notify-delay:
+
+notify-delay
+------------
+
+The time delay in seconds before an outgoing NOTIFY message is sent upon loading
+a new zone (e.g. to ensure that secondaries have enough time to adjust their catalogues).
+Set to -1 to prevent sending NOTIFY messages in this context.
+
+*Default:* ``0``
 
 .. _zone_acl:
 
@@ -2958,6 +2970,10 @@ logged).
 
    This mode is not compatible with :ref:`zone_dnssec-signing`.
 
+.. TIP::
+   If :ref:`server_dbus-event` is set to ``dnssec-invalid``, a corresponding
+   signal is emitted when the validation fails.
+
 *Default:* not set
 
 .. _zone_dnssec-policy:
@@ -2991,6 +3007,10 @@ On each zone load/update, verify that ZONEMD is present in the zone and valid.
 
 .. NOTE::
    Zone digest calculation may take much time and CPU on large zones.
+
+.. TIP::
+   If :ref:`server_dbus-event` is set to ``dnssec-invalid``, a corresponding
+   signal is emitted when the verification fails.
 
 *Default:* ``off``
 
@@ -3079,6 +3099,10 @@ reverse-generate
 This option triggers the automatic generation of reverse PTR records based on
 A/AAAA records in the specified zones. The entire generated zone is automatically
 stored in the journal.
+
+The auto-generated reverse zone is re-generated whenever any of the specified zones
+is updated. This includes the situation when reverse generation had failed due to
+some of the specified zones were not yet loaded or had expired.
 
 Current limitations:
 

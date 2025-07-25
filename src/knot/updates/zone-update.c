@@ -465,6 +465,12 @@ int zone_update_add(zone_update_t *update, const knot_rrset_t *rrset)
 		return KNOT_EOK;
 	}
 
+	// apply_add_rr might modify given rrset to what was really added (in non-strict mode)
+	knot_rrset_t *rrset_copy = knot_rrset_copy(rrset, NULL);
+	if (rrset_copy == NULL) {
+		return KNOT_ENOMEM;
+	}
+
 	int ret = KNOT_EOK;
 
 	if (update->flags & UPDATE_INCREMENTAL) {
@@ -472,7 +478,7 @@ int zone_update_add(zone_update_t *update, const knot_rrset_t *rrset)
 			// replace previous SOA
 			ret = apply_replace_soa(update->a_ctx, rrset);
 		} else {
-			ret = apply_add_rr(update->a_ctx, rrset);
+			ret = apply_add_rr(update->a_ctx, rrset_copy);
 			if (ret == KNOT_EOK) {
 				update_affected_rrtype(update, rrset->type);
 			}
@@ -500,21 +506,22 @@ int zone_update_add(zone_update_t *update, const knot_rrset_t *rrset)
 			ret = KNOT_EOK;
 		}
 	} else {
-		return KNOT_EINVAL;
+		ret = KNOT_EINVAL;
 	}
 
 chset_add:
 	if ((update->flags & (UPDATE_INCREMENTAL | UPDATE_HYBRID)) && ret == KNOT_EOK) {
-		ret = solve_add_different_ttl(update, rrset);
+		ret = solve_add_different_ttl(update, rrset_copy);
 		if (ret == KNOT_EOK && !(update->flags & UPDATE_NO_CHSET)) {
-			ret = changeset_add_addition(&update->change, rrset, CHANGESET_CHECK);
+			ret = changeset_add_addition(&update->change, rrset_copy, CHANGESET_CHECK);
 		}
 		if (ret == KNOT_EOK && (update->flags & UPDATE_EXTRA_CHSET)) {
 			assert(!(update->flags & UPDATE_NO_CHSET));
-			ret = changeset_add_addition(&update->extra_ch, rrset, CHANGESET_CHECK);
+			ret = changeset_add_addition(&update->extra_ch, rrset_copy, CHANGESET_CHECK);
 		}
 	}
 
+	knot_rrset_free(rrset_copy, NULL);
 	return ret;
 }
 
@@ -540,7 +547,7 @@ int zone_update_remove(zone_update_t *update, const knot_rrset_t *rrset)
 		if (rrset->type == KNOT_RRTYPE_SOA) {
 			/* SOA is replaced with addition */
 		} else {
-			ret = apply_remove_rr(update->a_ctx, rrset);
+			ret = apply_remove_rr(update->a_ctx, rrset_copy);
 			if (ret == KNOT_EOK) {
 				update_affected_rrtype(update, rrset->type);
 			}
@@ -867,7 +874,7 @@ int zone_update_semcheck(conf_t *conf, zone_update_t *update)
 	semcheck_optional_t mode = (conf_opt(&val) == SEMCHECKS_SOFT) ?
 	                           SEMCHECK_MANDATORY_SOFT : SEMCHECK_MANDATORY_ONLY;
 
-	ret = sem_checks_process(update->new_cont, mode, &handler, time(NULL));
+	ret = sem_checks_process(update->new_cont, mode, &handler, time(NULL), 0);
 	if (ret != KNOT_EOK) {
 		// error is logged by the error handler
 		return ret;
@@ -887,6 +894,9 @@ int zone_update_verify_digest(conf_t *conf, zone_update_t *update)
 	if (ret != KNOT_EOK) {
 		log_zone_error(update->zone->name, "ZONEMD, verification failed (%s)",
 		               knot_strerror(ret));
+		if (conf->cache.srv_dbus_event & DBUS_EVENT_ZONE_INVALID) {
+			dbus_emit_zone_invalid(update->zone->name, 0);
+		}
 	} else {
 		log_zone_info(update->zone->name, "ZONEMD, verification successful");
 	}
@@ -944,8 +954,12 @@ int zone_update_commit(conf_t *conf, zone_update_t *update)
 
 	val = conf_zone_get(conf, C_DNSSEC_VALIDATION, update->zone->name);
 	if (conf_bool(&val)) {
-		bool incr_valid = update->flags & UPDATE_INCREMENTAL;
-		ret = knot_dnssec_validate_zone(update, conf, 0, incr_valid, true);
+		validation_conf_t val_conf = {
+			.conf = conf,
+			.incremental = update->flags & UPDATE_INCREMENTAL,
+			.log_plan = true,
+		};
+		ret = knot_dnssec_validate_zone(update, &val_conf);
 		if (ret != KNOT_EOK) {
 			discard_adds_tree(update);
 			return ret;

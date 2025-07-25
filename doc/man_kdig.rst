@@ -91,6 +91,9 @@ Options
 **-d**
   Enable debug messages.
 
+**-dd**
+  Enable more verbose debug messages (print Subject Alternative Name).
+
 **-h**, **--help**
   Print the program help.
 
@@ -142,7 +145,7 @@ Options
 
 **+**\ [\ **no**\ ]\ **crypto**
   Display the DNSSEC keys and signatures values in base64, instead of omitting them.
-  Enabled by default.
+  (*)
 
 **+**\ [\ **no**\ ]\ **aaflag**
   Set the AA flag.
@@ -151,7 +154,7 @@ Options
   Set the TC flag.
 
 **+**\ [\ **no**\ ]\ **rdflag**
-  Set the RD flag. Enabled by default.
+  Set the RD flag. (*)
 
 **+**\ [\ **no**\ ]\ **recurse**
   Same as **+**\ [\ **no**\ ]\ **rdflag**
@@ -163,7 +166,7 @@ Options
   Set the zero flag bit.
 
 **+**\ [\ **no**\ ]\ **adflag**
-  Set the AD flag. Enabled by default.
+  Set the AD flag. (*)
 
 **+**\ [\ **no**\ ]\ **cdflag**
   Set the CD flag.
@@ -181,13 +184,13 @@ Options
   Show the query packet.
 
 **+**\ [\ **no**\ ]\ **header**
-  Show the packet header. Enabled by default.
+  Show the packet header. (*)
 
 **+**\ [\ **no**\ ]\ **comments**
-  Show commented section names. Enabled by default.
+  Show commented section names. (*)
 
 **+**\ [\ **no**\ ]\ **opt**
-  Show the EDNS pseudosection. Enabled by default.
+  Show the EDNS pseudosection. (*)
 
 **+**\ [\ **no**\ ]\ **opttext**
   Try to show unknown EDNS options as text.
@@ -197,28 +200,28 @@ Options
   `draft-peltan-edns-presentation-format-01 <https://www.ietf.org/archive/id/draft-peltan-edns-presentation-format-01.html>`_.
 
 **+**\ [\ **no**\ ]\ **question**
-  Show the question section. Enabled by default.
+  Show the question section. (*)
 
 **+**\ [\ **no**\ ]\ **answer**
-  Show the answer section. Enabled by default.
+  Show the answer section. (*)
 
 **+**\ [\ **no**\ ]\ **authority**
-  Show the authority section. Enabled by default.
+  Show the authority section. (*)
 
 **+**\ [\ **no**\ ]\ **additional**
-  Show the additional section. Enabled by default.
+  Show the additional section. (*)
 
 **+**\ [\ **no**\ ]\ **tsig**
-  Show the TSIG pseudosection. Enabled by default.
+  Show the TSIG pseudosection. (*)
 
 **+**\ [\ **no**\ ]\ **stats**
-  Show trailing packet statistics. Enabled by default.
+  Show trailing packet statistics. (*)
 
 **+**\ [\ **no**\ ]\ **class**
-  Show the DNS class. Enabled by default.
+  Show the DNS class. (*)
 
 **+**\ [\ **no**\ ]\ **ttl**
-  Show the TTL value. Enabled by default.
+  Show the TTL value. (*)
 
 **+**\ [\ **no**\ ]\ **tcp**
   Use the TCP protocol (default is UDP for standard query and TCP for AXFR/IXFR).
@@ -308,6 +311,9 @@ Options
 **+**\ [\ **no**\ ]\ **edns**\[\ =\ *N*\]
   Use EDNS version (default is 0).
 
+**+**\ [\ **no**\ ]\ **msgdelay**\ =\ *T*
+  Wait the specified number of milliseconds before receiving each AXFR/IXFR message.
+
 **+**\ [\ **no**\ ]\ **timeout**\ =\ *T*
   Set the wait-for-reply interval in seconds (default is 5 seconds). This timeout
   applies to each query attempt. Zero value or *notimeout* is interpreted as
@@ -349,7 +355,7 @@ Options
 Notes
 -----
 
-Every option is disabled by default if not mentioned otherwise.
+By default, only options marked with (*) are enabled.
 
 Options **-k** and **-y** can not be used simultaneously.
 

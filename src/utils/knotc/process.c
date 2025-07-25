@@ -57,11 +57,18 @@ static bool get_cmd_blocking_flag(const char *arg)
 	return false;
 }
 
-int set_config(const cmd_desc_t *desc, params_t *params)
+int set_config(const cmd_desc_t *desc, params_t *params, bool compl)
 {
 	/* Reset the configuration paths (needed in the interactive mode). */
 	params->config = params->orig_config;
 	params->confdb = params->orig_confdb;
+
+	if (!compl && (desc->flags & CMD_FLOG_MORE)) {
+		log_levels_set(LOG_TARGET_STDOUT, LOG_SOURCE_ANY,
+			       LOG_MASK(LOG_INFO) | LOG_MASK(LOG_NOTICE));
+	} else {
+		log_levels_set(LOG_TARGET_STDOUT, LOG_SOURCE_ANY, 0);
+	}
 
 	if (params->config != NULL && params->confdb != NULL) {
 		log_error("ambiguous configuration source");
@@ -229,7 +236,7 @@ int process_cmd(int argc, const char **argv, params_t *params)
 	}
 
 	/* Set up the configuration. */
-	int ret = set_config(desc, params);
+	int ret = set_config(desc, params, false);
 	if (ret != KNOT_EOK) {
 		return ret;
 	}
