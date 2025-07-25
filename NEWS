@@ -1,4 +1,21 @@
-Knot DNS 3.2.10 (2023-11-09)
+Knot DNS 3.2.11 (2023-10-30)
+============================
+
+Improvements:
+-------------
+ - keymgr: improved error message if a key file is not accessible
+ - keymgr: added offline RRSIGs validation at the end of their validity intervals
+ - doc: fixed some typos
+
+Bugfixes:
+---------
+ - knotd: DNAME record returned with query domain name instead of actual name #873
+ - knotd: failed to import configuration file if mod-geoip is in use  #881
+ - knotd: failed to sign RRSet that fits to 64k only if compressed
+ - keymgr: offline RRSIGs not refreshed if 'rrsig-refresh' is not set
+ - knsupdate: incorrect processing of @ in the delete operation #879
+
+Knot DNS 3.2.10 (2023-09-11)
 ============================
 
 Improvements:
@@ -17,7 +34,7 @@ Bugfixes:
  - kdig: some TLS parameters override QUIC parameters
  - libs: NULL record with empty RDATA isn't allowed
 
-Knot DNS 3.2.9 (2023-27-07)
+Knot DNS 3.2.9 (2023-07-27)
 ===========================
 
 Improvements:
@@ -34,7 +51,7 @@ Bugfixes:
  - knotd: failed to active D-Bus notifications if not started as systemd service
  - kjournalprint: database transaction not properly closed when terminated prematurely
 
-Knot DNS 3.2.8 (2023-26-06)
+Knot DNS 3.2.8 (2023-06-26)
 ===========================
 
 Improvements:
