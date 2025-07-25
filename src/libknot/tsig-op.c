@@ -18,6 +18,7 @@
 #include <inttypes.h>
 #include <time.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #include "libdnssec/error.h"
 #include "libdnssec/tsig.h"

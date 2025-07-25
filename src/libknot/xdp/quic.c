@@ -192,6 +192,7 @@ struct knot_quic_creds *knot_xquic_init_creds(bool server, const char *tls_cert,
 	}
 
 	int ret = gnutls_anti_replay_init(&creds->tls_anti_replay);
+	printf("gnutls_anti_replay_init: %d\n", ret);
 	if (ret != GNUTLS_E_SUCCESS) {
 		goto fail;
 	}
