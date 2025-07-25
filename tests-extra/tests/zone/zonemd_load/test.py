@@ -21,6 +21,7 @@ master.zonemd_generate = "zonemd-sha384"
 slave.zonemd_verify = True
 
 VALIDATE_ZONEFILE = random.choice([True, False])
+backup_cnt = 0
 
 t.start()
 
@@ -45,6 +46,7 @@ for load in ["whole", "difference", "difference-no-serial"]:
         slave.ctl("-f zone-purge " + ZONE)
         slave.reload()
         new_serials = slave.zones_wait(zone)
+        compare(serial, new_serials, "serials on master and slave")
 
         # Check if unchanged serial upon restart.
         master.stop()
@@ -53,6 +55,14 @@ for load in ["whole", "difference", "difference-no-serial"]:
 
         # Check if unchanged serial upon zone-reload.
         master.ctl("zone-reload " + ZONE)
+        master.zones_wait(zone, serial, equal=True, greater=False)
+
+        # Check if unchanged serial upon zonefile restore.
+        backup_cnt += 1
+        backup_dir = os.path.join(master.dir, "backup" + str(backup_cnt))
+        master.ctl("zone-backup %s +backupdir %s +zonefile" % (ZONE, backup_dir), wait=True)
+        master.ctl("-f zone-purge " + ZONE, wait=True)
+        master.ctl("zone-restore %s +backupdir %s" % (ZONE, backup_dir))
         master.zones_wait(zone, serial, equal=True, greater=False)
 
 t.end()

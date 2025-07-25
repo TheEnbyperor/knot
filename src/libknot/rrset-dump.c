@@ -1,4 +1,4 @@
-/*  Copyright (C) 2022 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2023 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -41,6 +41,7 @@
 #include "contrib/base64.h"
 #include "contrib/color.h"
 #include "contrib/ctype.h"
+#include "contrib/musl/inet_ntop.h"
 #include "contrib/time.h"
 #include "contrib/wire_ctx.h"
 
@@ -229,7 +230,7 @@ static void wire_ipv4_to_str(rrset_dump_params_t *p)
 	FILL_IN_INPUT(addr4.s_addr)
 
 	// Write address.
-	if (inet_ntop(AF_INET, &addr4, p->out, p->out_max) == NULL) {
+	if (knot_inet_ntop(AF_INET, &addr4, p->out, p->out_max) == NULL) {
 		p->ret = -1;
 		return;
 	}
@@ -256,7 +257,7 @@ static void wire_ipv6_to_str(rrset_dump_params_t *p)
 	FILL_IN_INPUT(addr6.s6_addr)
 
 	// Write address.
-	if (inet_ntop(AF_INET6, &addr6, p->out, p->out_max) == NULL) {
+	if (knot_inet_ntop(AF_INET6, &addr6, p->out, p->out_max) == NULL) {
 		p->ret = -1;
 		return;
 	}
@@ -712,34 +713,18 @@ static void wire_timestamp_to_str(rrset_dump_params_t *p)
 	p->total += out_len;
 }
 
-static int time_to_human_str(char         *out,
-                             const size_t out_len,
-                             uint32_t     data)
+static uint32_t wire_time_to_val(rrset_dump_params_t *p)
 {
-	size_t   total_len = 0;
-	uint32_t num;
-	int      ret;
+	uint32_t data;
+	size_t   in_len = sizeof(data);
 
-#define tths_process(unit_name, unit_size) \
-	num = data / (unit_size); \
-	if (num > 0) { \
-		ret = snprintf(out + total_len, out_len - total_len, \
-		               "%u%s", num, (unit_name)); \
-		if (ret <= 0 || (size_t)ret >= out_len - total_len) { \
-			return -1; \
-		} \
-		total_len += ret; \
-		data -= num * (unit_size); \
+	if (p->ret < 0 || p->in_max < in_len ||
+	    memcpy(&data, p->in, in_len) == NULL) {
+		p->ret = -1;
+		return 0;
 	}
 
-	tths_process("d", 86400);
-	tths_process("h", 3600);
-	tths_process("m", 60);
-	tths_process("s", 1);
-
-#undef tths_process
-
-	return total_len > 0 ? total_len : -1;
+	return ntohl(data);
 }
 
 static void wire_ttl_to_str(rrset_dump_params_t *p)
@@ -757,7 +742,7 @@ static void wire_ttl_to_str(rrset_dump_params_t *p)
 
 	if (p->style->human_ttl) {
 		// Write time in human readable format.
-		ret = time_to_human_str(p->out, p->out_max, ntohl(data));
+		ret = knot_time_print_human(ntohl(data), p->out, p->out_max, true);
 		CHECK_RET_POSITIVE
 	} else {
 		// Write timestamp only.
@@ -920,7 +905,7 @@ static void wire_apl_to_str(rrset_dump_params_t *p)
 		}
 
 		// Write address.
-		if (inet_ntop(AF_INET, &addr4, p->out, p->out_max) == NULL) {
+		if (knot_inet_ntop(AF_INET, &addr4, p->out, p->out_max) == NULL) {
 			p->ret = -1;
 			return;
 		}
@@ -941,7 +926,7 @@ static void wire_apl_to_str(rrset_dump_params_t *p)
 		}
 
 		// Write address.
-		if (inet_ntop(AF_INET6, &addr6, p->out, p->out_max) == NULL) {
+		if (knot_inet_ntop(AF_INET6, &addr6, p->out, p->out_max) == NULL) {
 			p->ret = -1;
 			return;
 		}
@@ -1488,6 +1473,20 @@ static void dnskey_info(const uint8_t *rdata,
 			    dump_string(p, s); CHECK_RET(p); \
 			}
 
+#define STORE_TIME	if (p->style->verbose) { \
+				time = wire_time_to_val(p); CHECK_RET(p); \
+			}
+#define COMMENT_TIME(s)	if (p->style->verbose) { \
+			    char buf[80]; \
+			    dump_string(p, " ; "); CHECK_RET(p); \
+			    dump_string(p, s); CHECK_RET(p); \
+			    if (knot_time_print_human(time, buf, sizeof(buf), false) > 0) { \
+			        dump_string(p, " ("); CHECK_RET(p); \
+			        dump_string(p, buf); CHECK_RET(p); \
+			        dump_string(p, ")"); CHECK_RET(p); \
+			    } \
+			}
+
 #define DUMP_SPACE	dump_string(p, " "); CHECK_RET(p);
 #define DUMP_NUM8	wire_num8_to_str(p); CHECK_RET(p);
 #define DUMP_NUM16	wire_num16_to_str(p); CHECK_RET(p);
@@ -1543,13 +1542,14 @@ static int dump_ns(DUMP_PARAMS)
 static int dump_soa(DUMP_PARAMS)
 {
 	if (p->style->wrap) {
+		uint32_t time = 0;
 		DUMP_DNAME; DUMP_SPACE;
 		DUMP_DNAME; DUMP_SPACE; WRAP_INIT;
 		DUMP_NUM32; COMMENT("serial"); WRAP_LINE;
-		DUMP_TIME;  COMMENT("refresh"); WRAP_LINE;
-		DUMP_TIME;  COMMENT("retry"); WRAP_LINE;
-		DUMP_TIME;  COMMENT("expire"); WRAP_LINE;
-		DUMP_TIME;  COMMENT("minimum"); WRAP_END;
+		STORE_TIME; DUMP_TIME; COMMENT_TIME("refresh"); WRAP_LINE;
+		STORE_TIME; DUMP_TIME; COMMENT_TIME("retry"); WRAP_LINE;
+		STORE_TIME; DUMP_TIME; COMMENT_TIME("expire"); WRAP_LINE;
+		STORE_TIME; DUMP_TIME; COMMENT_TIME("minimum"); WRAP_END;
 	} else {
 		DUMP_DNAME; DUMP_SPACE;
 		DUMP_DNAME; DUMP_SPACE;
@@ -2149,7 +2149,7 @@ int knot_rrset_txt_dump_header(const knot_rrset_t      *rrset,
 			ret = snprintf(dst + len, maxlen - len, "%c", sep);
 		} else if (style->human_ttl) {
 			// Create human readable ttl string.
-			if (time_to_human_str(buf, sizeof(buf), ttl) < 0) {
+			if (knot_time_print_human(ttl, buf, sizeof(buf), true) < 0) {
 				return KNOT_ESPACE;
 			}
 			ret = snprintf(dst + len, maxlen - len, "%s%c",

@@ -97,3 +97,7 @@ Makefile.in
 /.settings/
 
 .idea
+
+# cygwin
+*.exe
+*.exe.manifest
