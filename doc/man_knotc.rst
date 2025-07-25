@@ -135,17 +135,20 @@ Actions
 **zone-backup** [*zone*...] **+backupdir** *directory* [*filter*...]
   Trigger a zone data and metadata backup to a specified directory.
   Available filters are **+zonefile**, **+journal**, **+timers**, **+kaspdb**,
-  **+catalog**, **+quic**, and their negative counterparts **+nozonefile**,
-  **+nojournal**, **+notimers**, **+nokaspdb**, **+nocatalog**, and **+noquic**.
-  With these filters set, zone contents, zone's journal, zone-related timers,
-  zone-related data in the KASP database together with keys, zone's catalog,
+  **+keysonly**, **+catalog**, **+quic**, and their negative counterparts
+  **+nozonefile**, **+nojournal**, **+notimers**, **+nokaspdb**, **+nokeysonly**,
+  **+nocatalog**, and **+noquic**. With these filters set, zone contents,
+  zone's journal, zone-related timers, zone-related data in the KASP database
+  together with keys (or keys without the KASP database), zone's catalog,
   and the server QUIC key and certificate, respectively, are backed up,
   or omitted from the backup. By default, filters **+zonefile**, **+timers**,
-  **+kaspdb**, **+catalog**, **+nojournal**, and **+noquic** are set. Setting
-  a filter for an item doesn't change default settings for other items.
-  If zone flushing is disabled, the original zone file is backed up instead of
-  writing out zone contents to a file. See :ref:`Notes<notes>` below about
-  the directory permissions. (#)
+  **+kaspdb**, **+nokeysonly**, **+catalog**, **+nojournal**, and **+noquic**
+  are set.  Setting a filter for an item doesn't change default settings for
+  other items. If zone flushing is disabled, the original zone file is backed
+  up instead of writing out zone contents to a file. When backing-up a catalog
+  zone, it is recommended to prevent ongoing changes to it by use of
+  **zone-freeze**.
+  See :ref:`Notes<notes>` below about the directory permissions. (#)
 
 **zone-restore** [*zone*...] **+backupdir** *directory* [*filter*...]
   Trigger a zone data and metadata restore from a specified backup directory.
@@ -220,7 +223,9 @@ Actions
   **+kaspdb**, and **+catalog**. If no filter is specified, all filters are enabled.
   If the zone is no longer configured, add **+orphan** parameter (zone file cannot
   be purged in this case). When purging orphans, always check the server log for
-  possible errors. This command always requires the force option. (#)
+  possible errors. For proper operation, it's necessary to prevent ongoing changes
+  to the zone and triggering of zone related events during purge; use of
+  **zone-freeze** is advisable. This command always requires the force option. (#)
 
 **zone-stats** *zone* [*module*\ [\ **.**\ *counter*\ ]]
   Show zone statistics counter(s). To print also counters with value 0, use

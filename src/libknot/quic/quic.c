@@ -53,6 +53,7 @@
 #define QUIC_SEND_RETRY                  NGTCP2_ERR_RETRY
 #define QUIC_SEND_STATELESS_RESET        (-NGTCP2_STATELESS_RESET_TOKENLEN)
 #define QUIC_SEND_CONN_CLOSE             (-KNOT_QUIC_HANDLE_RET_CLOSE)
+#define QUIC_SEND_EXCESSIVE_LOAD         (-KNOT_QUIC_ERR_EXCESSIVE_LOAD)
 
 #define TLS_CALLBACK_ERR     (-1)
 
@@ -85,7 +86,7 @@ static unsigned addr_len(const struct sockaddr_in6 *ss)
 _public_
 bool knot_quic_session_available(knot_quic_conn_t *conn)
 {
-	return !(conn->flags & KNOT_QUIC_CONN_SESSION_TAKEN) &&
+	return conn != NULL && !(conn->flags & KNOT_QUIC_CONN_SESSION_TAKEN) &&
 	       (gnutls_session_get_flags(conn->tls_session) & GNUTLS_SFLAGS_SESSION_TICKET);
 }
 
@@ -437,18 +438,7 @@ static uint64_t get_timestamp(void)
 
 uint64_t quic_conn_get_timeout(knot_quic_conn_t *conn)
 {
-	// This effectively obtains the locally configured conn timeout.
-	// It would be possible to obey negotitated idle timeout by employing remote params,
-	// but this would differ per-connection and the whole idea of maintaining
-	// to-be-timeouted connections in simple linear list requires that
-	// the idle timeout is homogeneous among conns.
-	// Anyway, we also violate RFC9000/10.1 (Probe Timeout) for the same reason.
-	// TODO for the future: refactor conn table to use some tree/heap
-	// for to-be-timeouted conns, and use ngtcp2_conn_get_expiry() and
-	// ngtcp2_conn_handle_expiry() appropriately.
-	const ngtcp2_transport_params *params = ngtcp2_conn_get_local_transport_params(conn->conn);
-
-	return conn->last_ts + params->max_idle_timeout;
+	return ngtcp2_conn_get_expiry(conn->conn);
 }
 
 bool quic_conn_timeout(knot_quic_conn_t *conn, uint64_t *now)
@@ -457,6 +447,18 @@ bool quic_conn_timeout(knot_quic_conn_t *conn, uint64_t *now)
 		*now = get_timestamp();
 	}
 	return *now > quic_conn_get_timeout(conn);
+}
+
+_public_
+int64_t knot_quic_conn_next_timeout(knot_quic_conn_t *conn)
+{
+	return (((int64_t)quic_conn_get_timeout(conn) - (int64_t)get_timestamp()) / 1000000L);
+}
+
+_public_
+int knot_quic_hanle_expiry(knot_quic_conn_t *conn)
+{
+	return ngtcp2_conn_handle_expiry(conn->conn, get_timestamp()) == NGTCP2_NO_ERROR ? KNOT_EOK : KNOT_ECONN;
 }
 
 _public_
@@ -869,6 +871,10 @@ int knot_quic_client(knot_quic_table_t *table, struct sockaddr_in6 *dest,
 	ngtcp2_cid scid = { 0 }, dcid = { 0 };
 	uint64_t now = get_timestamp();
 
+	if (table == NULL || dest == NULL || via == NULL || out_conn == NULL) {
+		return KNOT_EINVAL;
+	}
+
 	init_random_cid(&scid, 0);
 	init_random_cid(&dcid, 0);
 
@@ -876,7 +882,6 @@ int knot_quic_client(knot_quic_table_t *table, struct sockaddr_in6 *dest,
 	if (conn == NULL) {
 		return ENOMEM;
 	}
-	quic_conn_mark_used(conn, table, now);
 
 	ngtcp2_path path;
 	path.remote.addr = (struct sockaddr *)dest;
@@ -908,10 +913,17 @@ int knot_quic_handle(knot_quic_table_t *table, knot_quic_reply_t *reply,
                      uint64_t idle_timeout, knot_quic_conn_t **out_conn)
 {
 	*out_conn = NULL;
+	if (table == NULL || reply == NULL || out_conn == NULL) {
+		return KNOT_EINVAL;
+	}
 
 	ngtcp2_version_cid decoded_cids = { 0 };
 	ngtcp2_cid scid = { 0 }, dcid = { 0 }, odcid = { 0 };
 	uint64_t now = get_timestamp();
+	if (reply->in_payload->iov_len < 1) {
+		reply->handle_ret = KNOT_EOK;
+		return KNOT_EOK;
+	}
 	int ret = ngtcp2_pkt_decode_version_cid(&decoded_cids,
 	                                        reply->in_payload->iov_base,
 	                                        reply->in_payload->iov_len,
@@ -986,7 +998,6 @@ int knot_quic_handle(knot_quic_table_t *table, knot_quic_reply_t *reply,
 			ret = KNOT_ENOMEM;
 			goto finish;
 		}
-		quic_conn_mark_used(conn, table, now);
 
 		ret = conn_new(&conn->conn, &path, &dcid, &scid, &odcid, decoded_cids.version,
 		               now, idle_timeout, conn, true, header.tokenlen > 0);
@@ -1023,7 +1034,7 @@ int knot_quic_handle(knot_quic_table_t *table, knot_quic_reply_t *reply,
 		goto finish;
 	}
 
-	quic_conn_mark_used(conn, table, now);
+	quic_conn_mark_used(conn, table);
 
 	ret = KNOT_EOK;
 finish:
@@ -1063,9 +1074,17 @@ static int send_stream(knot_quic_table_t *quic_table, knot_quic_reply_t *rpl,
 	ngtcp2_vec vec = { .base = data, .len = len };
 	ngtcp2_pkt_info pi = { 0 };
 
-	ret = ngtcp2_conn_writev_stream(relay->conn, NULL, &pi, rpl->out_payload->iov_base,
-	                                rpl->out_payload->iov_len, sent, fl, stream_id,
-	                                &vec, (stream_id >= 0 ? 1 : 0), get_timestamp());
+	struct sockaddr_storage path_loc = { 0 }, path_rem = { 0 };
+	ngtcp2_path path = { .local  = { .addr = (struct sockaddr *)&path_loc, .addrlen = sizeof(path_loc) },
+	                     .remote = { .addr = (struct sockaddr *)&path_rem, .addrlen = sizeof(path_rem) },
+	                     .user_data = NULL };
+	bool find_path = (rpl->ip_rem == NULL);
+	assert(find_path == (bool)(rpl->ip_loc == NULL));
+
+	ret = ngtcp2_conn_writev_stream(relay->conn, find_path ? &path : NULL, &pi,
+	                                rpl->out_payload->iov_base, rpl->out_payload->iov_len,
+	                                sent, fl, stream_id, &vec,
+	                                (stream_id >= 0 ? 1 : 0), get_timestamp());
 	if (ret <= 0) {
 		rpl->free_reply(rpl);
 		return ret;
@@ -1076,7 +1095,15 @@ static int send_stream(knot_quic_table_t *quic_table, knot_quic_reply_t *rpl,
 
 	rpl->out_payload->iov_len = ret;
 	rpl->ecn = pi.ecn;
+	if (find_path) {
+		rpl->ip_loc = &path_loc;
+		rpl->ip_rem = &path_rem;
+	}
 	ret = rpl->send_reply(rpl);
+	if (find_path) {
+		rpl->ip_loc = NULL;
+		rpl->ip_rem = NULL;
+	}
 	if (ret == KNOT_EOK) {
 		return 1;
 	}
@@ -1094,11 +1121,15 @@ static int send_special(knot_quic_table_t *quic_table, knot_quic_reply_t *rpl,
 	uint64_t now = get_timestamp();
 	ngtcp2_version_cid decoded_cids = { 0 };
 	ngtcp2_cid scid = { 0 }, dcid = { 0 };
+	int dvc_ret = NGTCP2_ERR_FATAL;
 
-	int dvc_ret = ngtcp2_pkt_decode_version_cid(&decoded_cids,
-	                                            rpl->in_payload->iov_base,
-	                                            rpl->in_payload->iov_len,
-	                                            SERVER_DEFAULT_SCIDLEN);
+	if ((rpl->handle_ret == -QUIC_SEND_VERSION_NEGOTIATION ||
+	     rpl->handle_ret == -QUIC_SEND_RETRY) &&
+	    rpl->in_payload != NULL && rpl->in_payload->iov_len > 0) {
+		dvc_ret = ngtcp2_pkt_decode_version_cid(
+			&decoded_cids, rpl->in_payload->iov_base,
+			rpl->in_payload->iov_len, SERVER_DEFAULT_SCIDLEN);
+	}
 
 	uint8_t rnd = 0;
 	dnssec_random_buffer(&rnd, sizeof(rnd));
@@ -1111,6 +1142,14 @@ static int send_special(knot_quic_table_t *quic_table, knot_quic_reply_t *rpl,
 	ngtcp2_ccerr ccerr;
 	ngtcp2_ccerr_default(&ccerr);
 	ngtcp2_pkt_info pi = { 0 };
+
+	struct sockaddr_storage path_loc = { 0 }, path_rem = { 0 };
+	ngtcp2_path path = { .local  = { .addr = (struct sockaddr *)&path_loc, .addrlen = sizeof(path_loc) },
+	                     .remote = { .addr = (struct sockaddr *)&path_rem, .addrlen = sizeof(path_rem) },
+	                     .user_data = NULL };
+	bool find_path = (rpl->ip_rem == NULL);
+	assert(find_path == (bool)(rpl->ip_loc == NULL));
+	assert(!find_path || rpl->handle_ret == -QUIC_SEND_EXCESSIVE_LOAD);
 
 	switch (rpl->handle_ret) {
 	case -QUIC_SEND_VERSION_NEGOTIATION:
@@ -1154,7 +1193,16 @@ static int send_special(knot_quic_table_t *quic_table, knot_quic_reply_t *rpl,
 		break;
 	case -QUIC_SEND_CONN_CLOSE:
 		ret = ngtcp2_conn_write_connection_close(
-			relay->conn, NULL, &pi, rpl->out_payload->iov_base, rpl->out_payload->iov_len, &ccerr, now
+			relay->conn, NULL, &pi, rpl->out_payload->iov_base,
+			rpl->out_payload->iov_len, &ccerr, now
+		);
+		break;
+	case -QUIC_SEND_EXCESSIVE_LOAD:
+		ccerr.type = NGTCP2_CCERR_TYPE_APPLICATION;
+		ccerr.error_code = KNOT_QUIC_ERR_EXCESSIVE_LOAD;
+		ret = ngtcp2_conn_write_connection_close(
+			relay->conn, find_path ? &path : NULL, &pi, rpl->out_payload->iov_base,
+			rpl->out_payload->iov_len, &ccerr, now
 		);
 		break;
 	default:
@@ -1167,7 +1215,15 @@ static int send_special(knot_quic_table_t *quic_table, knot_quic_reply_t *rpl,
 	} else {
 		rpl->out_payload->iov_len = ret;
 		rpl->ecn = pi.ecn;
+		if (find_path) {
+			rpl->ip_loc = &path_loc;
+			rpl->ip_rem = &path_rem;
+		}
 		ret = rpl->send_reply(rpl);
+		if (find_path) {
+			rpl->ip_loc = NULL;
+			rpl->ip_rem = NULL;
+		}
 	}
 	return ret;
 }
@@ -1177,7 +1233,9 @@ int knot_quic_send(knot_quic_table_t *quic_table, knot_quic_conn_t *conn,
                    knot_quic_reply_t *reply, unsigned max_msgs,
                    knot_quic_send_flag_t flags)
 {
-	if (reply->handle_ret < 0) {
+	if (quic_table == NULL || conn == NULL || reply == NULL) {
+		return KNOT_EINVAL;
+	} else if (reply->handle_ret < 0) {
 		return reply->handle_ret;
 	} else if (reply->handle_ret > 0) {
 		return send_special(quic_table, reply, conn);

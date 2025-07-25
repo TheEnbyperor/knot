@@ -32,6 +32,11 @@
 
 #define KNOT_QUIC_PIN_LEN	32
 
+#define KNOT_QUIC_HANDLE_RET_CLOSE	2000
+
+// RFC 9250
+#define KNOT_QUIC_ERR_EXCESSIVE_LOAD	0x4
+
 struct gnutls_x509_crt_int;
 struct knot_quic_creds;
 struct knot_quic_session;
@@ -56,8 +61,6 @@ typedef struct knot_quic_reply {
 	int (*send_reply)(struct knot_quic_reply *);
 	void (*free_reply)(struct knot_quic_reply *);
 } knot_quic_reply_t;
-
-#define KNOT_QUIC_HANDLE_RET_CLOSE  (2000)
 
 /*!
  * \brief Check if session ticket can be taken out of this connection.
@@ -137,6 +140,10 @@ uint64_t quic_conn_get_timeout(knot_quic_conn_t *conn);
  * \return True if the connection timed out idle.
  */
 bool quic_conn_timeout(knot_quic_conn_t *conn, uint64_t *now);
+
+int64_t knot_quic_conn_next_timeout(knot_quic_conn_t *conn);
+
+int knot_quic_hanle_expiry(knot_quic_conn_t *conn);
 
 /*!
  * \brief Returns measured connection RTT in usecs.

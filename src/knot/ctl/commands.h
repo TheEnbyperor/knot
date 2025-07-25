@@ -19,19 +19,20 @@
 #include "libknot/libknot.h"
 #include "knot/server/server.h"
 
-#define CTL_FLAG_FORCE		"F"
-#define CTL_FLAG_BLOCKING	"B"
+#define CTL_FLAG_FORCE			"F"
+#define CTL_FLAG_BLOCKING		"B"
 
-#define CTL_FLAG_DIFF_ADD	"+"
-#define CTL_FLAG_DIFF_REM	"-"
+#define CTL_FLAG_DIFF_ADD		"+"
+#define CTL_FLAG_DIFF_REM		"-"
 
-#define CTL_FLAG_LIST_SCHEMA	"s"
-#define CTL_FLAG_LIST_TXN	"t"
-#define CTL_FLAG_LIST_ZONES	"z"
+#define CTL_FLAG_LIST_SCHEMA		"s"
+#define CTL_FLAG_LIST_TXN		"t"
+#define CTL_FLAG_LIST_ZONES		"z"
 
-#define CTL_FLAG_STATUS_EMPTY	"e"
-#define CTL_FLAG_STATUS_SLAVE	"s"
-#define CTL_FLAG_STATUS_MEMBER	"m"
+#define CTL_FLAG_STATUS_EMPTY		"e"
+#define CTL_FLAG_STATUS_SLAVE		"s"
+#define CTL_FLAG_STATUS_MEMBER		"m"
+#define CTL_FLAG_STATUS_UNIXTIME	"u"
 
 #define CTL_FILTER_FLUSH_OUTDIR		'd'
 
@@ -59,6 +60,8 @@
 #define CTL_FILTER_BACKUP_NOTIMERS	'T'
 #define CTL_FILTER_BACKUP_KASPDB	'k'
 #define CTL_FILTER_BACKUP_NOKASPDB	'K'
+#define CTL_FILTER_BACKUP_KEYSONLY	'o'
+#define CTL_FILTER_BACKUP_NOKEYSONLY	'O'
 #define CTL_FILTER_BACKUP_CATALOG	'c'
 #define CTL_FILTER_BACKUP_NOCATALOG	'C'
 #define CTL_FILTER_BACKUP_QUIC		'q'

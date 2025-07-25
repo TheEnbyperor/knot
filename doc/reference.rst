@@ -1362,13 +1362,33 @@ remote is reached.
 via
 ---
 
-An ordered list of source IP addresses. The first address with the same family
-as the destination address is used as a source address for communication with
-the remote. This option can help if the server listens on more addresses.
+An ordered list of source IP addresses which are used as source addresses
+for communication with the remote. For the N-th :ref:`remote address <remote_address>`,
+the last, but at most N-th, specified :ref:`via address<remote_via>`
+of the same family is used.
+This option can help if the server listens on more addresses.
 Optional source port (default is random) can be appended
 to the address using ``@`` separator.
 
 *Default:* not set
+
+.. NOTE::
+
+  For the following configuration:
+
+  ::
+
+    remote:
+      - id: example
+        address: [198.51.100.10, 2001:db8::10, 198.51.100.20, 2001:db8::20]
+        via: [198.51.100.1, 198.51.100.2, 2001:db8::1]
+
+  the (``via`` -> ``address``) mapping is:
+
+  - ``198.51.100.1`` -> ``198.51.100.10``
+  - ``2001:db8::1`` ->  ``2001:db8::10``
+  - ``198.51.100.2`` -> ``198.51.100.20``
+  - ``2001:db8::1`` -> ``2001:db8::20``
 
 .. _remote_quic:
 
@@ -1509,7 +1529,7 @@ and dynamic DNS update) which are allowed to be processed or denied.
      deny: BOOL
      update-type: STR ...
      update-owner: key | zone | name
-     update-owner-match: sub-or-equal | equal | sub
+     update-owner-match: sub-or-equal | equal | sub | pattern
      update-owner-name: STR ...
 
 .. _acl_id:
@@ -1646,6 +1666,10 @@ Possible values:
   name set by :ref:`acl_update-owner`.
 - ``sub`` — The owner of each updated RR must be a subdomain of, but MUST NOT
   be equal to at least one domain name set by :ref:`acl_update-owner`.
+- ``pattern`` — The owner of each updated RR must match a pattern specified by
+  :ref:`acl_update-owner`. The pattern can be an arbitrary FQDN or non-FQDN
+  domain name. If a label consists of one ``*`` (asterisk) character, it
+  matches any label. More asterisk labels can be specified.
 
 *Default:* ``sub-or-equal``
 
@@ -2034,7 +2058,7 @@ rrsig-refresh
 A period how long at least before a signature expiration the signature will be refreshed,
 in order to prevent expired RRSIGs on secondary servers or resolvers' caches.
 
-*Default:* :ref:`policy_propagation-delay` + :ref:`policy_zone-max-ttl`
+*Default:* 0.1 * :ref:`policy_rrsig-lifetime` + :ref:`policy_propagation-delay` + :ref:`policy_zone-max-ttl`
 
 .. _policy_rrsig-pre-refresh:
 
@@ -2577,6 +2601,10 @@ and no zone contents in the journal), it behaves the same way as ``whole``.
 
 *Default:* ``whole``
 
+.. NOTE::
+   See :ref:`Handling, zone file, journal, changes, serials` for guidance on
+   configuring these and related options to ensure reliable operation.
+
 .. _zone_journal-content:
 
 journal-content
@@ -2591,6 +2619,14 @@ Possible values:
 - ``all`` – Zone contents and history is stored in journal.
 
 *Default:* ``changes``
+
+.. WARNING::
+   When this option is changed, the journal still contains data respective to
+   the previous setting. For example, changing it to ``none`` does not purge
+   the journal. Also, changing it from ``all`` to ``changes``
+   does not cause the deletion of the zone-in-journal and the behaviour of the
+   zone loading procedure might be different than expected. It is recommended
+   to consider purging the journal when this option is changed.
 
 .. _zone_journal-max-usage:
 
