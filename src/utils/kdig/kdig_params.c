@@ -1514,7 +1514,7 @@ static const param_t kdig_opts2[] = {
 	{ "rdflag",         ARG_NONE,     opt_rdflag },
 	{ "nordflag",       ARG_NONE,     opt_nordflag },
 
-	{ "recurse",        ARG_NONE,     opt_rdflag },
+	{ "recurse",        ARG_NONE,     opt_rdflag },   // Alias.
 	{ "norecurse",      ARG_NONE,     opt_nordflag },
 
 	{ "raflag",         ARG_NONE,     opt_raflag },
@@ -1529,7 +1529,10 @@ static const param_t kdig_opts2[] = {
 	{ "cdflag",         ARG_NONE,     opt_cdflag },
 	{ "nocdflag",       ARG_NONE,     opt_nocdflag },
 
-	{ "dnssec",         ARG_NONE,     opt_doflag },
+	{ "doflag",         ARG_NONE,     opt_doflag },
+	{ "nodoflag",       ARG_NONE,     opt_nodoflag },
+
+	{ "dnssec",         ARG_NONE,     opt_doflag },   // Alias.
 	{ "nodnssec",       ARG_NONE,     opt_nodoflag },
 
 	{ "all",            ARG_NONE,     opt_all },
@@ -2350,34 +2353,36 @@ static void print_help(void)
 	       "            [-y [algo:]keyname:key] [-E tapfile] [-G tapfile]\n"
 	       "            name [type] [class] [@server]\n"
 	       "\n"
+	       "                                * is on by default.\n"
 	       "       +[no]multiline             Wrap long records to more lines.\n"
 	       "       +[no]short                 Show record data only.\n"
 	       "       +[no]generic               Use generic representation format.\n"
 	       "       +[no]aaflag                Set AA flag.\n"
 	       "       +[no]tcflag                Set TC flag.\n"
-	       "       +[no]rdflag                Set RD flag.\n"
+	       "       +[no]rdflag              * Set RD flag.\n"
 	       "       +[no]recurse               Same as +[no]rdflag\n"
 	       "       +[no]raflag                Set RA flag.\n"
 	       "       +[no]zflag                 Set zero flag bit.\n"
-	       "       +[no]adflag                Set AD flag.\n"
+	       "       +[no]adflag              * Set AD flag.\n"
 	       "       +[no]cdflag                Set CD flag.\n"
-	       "       +[no]dnssec                Set DO flag.\n"
+	       "       +[no]doflag                Set DO flag.\n"
+	       "       +[no]dnssec                Same as +[no]doflag.\n"
 	       "       +[no]all                   Show all packet sections.\n"
 	       "       +[no]qr                    Show query packet.\n"
-	       "       +[no]header                Show packet header.\n"
-	       "       +[no]comments              Show commented section names.\n"
-	       "       +[no]opt                   Show EDNS pseudosection.\n"
+	       "       +[no]header              * Show packet header.\n"
+	       "       +[no]comments            * Show commented section names.\n"
+	       "       +[no]opt                 * Show EDNS pseudosection.\n"
 	       "       +[no]opttext               Try to show unknown EDNS options as text.\n"
 	       "       +[no]optpresent            Show EDNS in presenatation format.\n"
-	       "       +[no]question              Show question section.\n"
-	       "       +[no]answer                Show answer section.\n"
-	       "       +[no]authority             Show authority section.\n"
-	       "       +[no]additional            Show additional section.\n"
-	       "       +[no]tsig                  Show TSIG pseudosection.\n"
-	       "       +[no]stats                 Show trailing packet statistics.\n"
-	       "       +[no]class                 Show DNS class.\n"
-	       "       +[no]ttl                   Show TTL value.\n"
-	       "       +[no]crypto                Show binary parts of RRSIGs and DNSKEYs.\n"
+	       "       +[no]question            * Show question section.\n"
+	       "       +[no]answer              * Show answer section.\n"
+	       "       +[no]authority           * Show authority section.\n"
+	       "       +[no]additional          * Show additional section.\n"
+	       "       +[no]tsig                * Show TSIG pseudosection.\n"
+	       "       +[no]stats               * Show trailing packet statistics.\n"
+	       "       +[no]class               * Show DNS class.\n"
+	       "       +[no]ttl                 * Show TTL value.\n"
+	       "       +[no]crypto              * Show binary parts of RRSIGs and DNSKEYs.\n"
 	       "       +[no]tcp                   Use TCP protocol.\n"
 	       "       +[no]fastopen              Use TCP Fast Open.\n"
 	       "       +[no]ignore                Don't use TCP automatically if truncated.\n"

@@ -18,9 +18,8 @@
 #include <assert.h>
 #include <gnutls/crypto.h>
 #include <gnutls/gnutls.h>
+#include <poll.h>
 #include <stdlib.h>
-#include <sys/types.h>
-#include <sys/socket.h>
 
 #include "libknot/quic/tls.h"
 
@@ -83,7 +82,7 @@ knot_tls_conn_t *knot_tls_conn_new(knot_tls_ctx_t *ctx, int sock_fd)
 	res->fd = sock_fd;
 
 	int ret = knot_tls_session(&res->session, ctx->creds, ctx->priority,
-	                           "\x03""dot", true, ctx->server);
+	                           false, true, ctx->server);
 	if (ret != KNOT_EOK) {
 		goto fail;
 	}
@@ -165,12 +164,13 @@ int knot_tls_handshake(knot_tls_conn_t *conn, bool oneshot)
 		return KNOT_EOK;
 	}
 
-	/* Check if NB socket is writeable. */
-	int opt;
-	socklen_t opt_len = sizeof(opt);
-	int ret = getsockopt(conn->fd, SOL_SOCKET, SO_ERROR, &opt, &opt_len);
-	if (ret < 0 || opt == ECONNREFUSED) {
-		return KNOT_NET_ECONNECT;
+	struct pollfd pfd = {
+		.fd = conn->fd,
+		.events = POLLOUT
+	};
+	int ret = poll(&pfd, 1, conn->ctx->io_timeout);
+	if (ret != 1) {
+		return ret == 0 ? KNOT_NET_ECONNECT : KNOT_EAGAIN;
 	}
 
 	gnutls_record_set_timeout(conn->session, conn->ctx->io_timeout);

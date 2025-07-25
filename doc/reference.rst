@@ -396,6 +396,9 @@ time-consuming requests (e.g. zone transfers of a TLD zone), enabled reuseport
 may result in delayed or not being responded client requests. So it is
 advisable to use this option on secondary servers.
 
+.. NOTE::
+   This option is ignored for UNIX sockets.
+
 Change of this parameter requires restart of the Knot server to take effect.
 
 *Default:* ``off``
@@ -655,6 +658,10 @@ Possible values:
 
 .. NOTE::
    This function requires systemd version at least 221 or libdbus.
+
+.. TIP::
+   A few sample script templates can be found in
+   `the project repository <https://gitlab.nic.cz/knot/knot-dns/-/tree/master/samples>`_.
 
 Change of this parameter requires restart of the Knot server to take effect.
 
@@ -1413,7 +1420,7 @@ Possible values:
 - ``hmac-sha384``
 - ``hmac-sha512``
 
-*Default:* not set
+*Default:* ``hmac-sha256``
 
 .. _key_secret:
 
@@ -2399,6 +2406,11 @@ cds-digest-type
 
 Specify digest type for published CDS records.
 
+Possible values:
+
+- ``sha256``
+- ``sha384``
+
 *Default:* ``sha256``
 
 .. _policy_dnskey-management:
@@ -2544,7 +2556,7 @@ Definition of zones served by the server.
      zonemd-generate: none | zonemd-sha384 | zonemd-sha512 | remove
      serial-policy: increment | unixtime | dateserial
      serial-modulo: INT/INT | +INT | -INT | INT/INT+INT | INT/INT-INT
-     reverse-generate: DNAME
+     reverse-generate: DNAME ...
      refresh-min-interval: TIME
      refresh-max-interval: TIME
      retry-min-interval: TIME
@@ -3065,13 +3077,13 @@ reverse-generate
 ----------------
 
 This option triggers the automatic generation of reverse PTR records based on
-A/AAAA records in the specified zone. The entire generated zone is automatically
+A/AAAA records in the specified zones. The entire generated zone is automatically
 stored in the journal.
 
 Current limitations:
 
-- Only one zone to be reversed can be specified.
 - Is slow for large zones (even when changing a little).
+- Recomputes all reverse records upon any change in any of the reversed zones.
 
 *Default:* none
 
