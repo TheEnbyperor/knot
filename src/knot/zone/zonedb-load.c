@@ -156,8 +156,10 @@ static zone_t *create_zone_new(conf_t *conf, const knot_dname_t *name,
 		zone->catalog_gen = knot_dname_copy(conf_dname(&catz), NULL);
 		if (zone->timers.catalog_member == 0) {
 			zone->timers.catalog_member = time(NULL);
+			ret = zone_timers_write(&zone->server->timerdb, zone->name,
+			                        &zone->timers);
 		}
-		if (zone->catalog_gen == NULL) {
+		if (ret != KNOT_EOK || zone->catalog_gen == NULL) {
 			log_zone_error(zone->name, "failed to initialize catalog member zone (%s)",
 			               knot_strerror(KNOT_ENOMEM));
 			zone_free(&zone);
@@ -646,6 +648,7 @@ int zone_reload_modules(conf_t *conf, server_t *server, const knot_dname_t *zone
 	if (newzone == NULL) {
 		return KNOT_ENOMEM;
 	}
+	knot_sem_wait(&newzone->cow_lock);
 	conf_activate_modules(conf, server, newzone->name, &newzone->query_modules,
 	                      &newzone->query_plan);
 
@@ -657,6 +660,7 @@ int zone_reload_modules(conf_t *conf, server_t *server, const knot_dname_t *zone
 	assert(newzone->contents == oldzone->contents);
 	oldzone->contents = NULL; // contents have been re-used by newzone
 
+	knot_sem_post(&newzone->cow_lock);
 	knot_sem_post(&oldzone->cow_lock);
 	zone_free(&oldzone);
 

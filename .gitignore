@@ -101,3 +101,6 @@ Makefile.in
 # cygwin
 *.exe
 *.exe.manifest
+
+# clang
+.qtc_clangd
