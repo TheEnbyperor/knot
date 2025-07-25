@@ -1,4 +1,4 @@
-/*  Copyright (C) 2022 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
+/*  Copyright (C) 2024 CZ.NIC, z.s.p.o. <knot-dns@labs.nic.cz>
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -123,23 +123,24 @@ static int connect_nsec_nodes(zone_node_t *a, zone_node_t *b,
 	assert(b);
 	assert(data);
 
-	if (b->rrset_count == 0 || b->flags & NODE_FLAGS_NONAUTH) {
-		return NSEC_NODE_SKIP;
-	}
-
 	int ret = KNOT_EOK;
 
 	/*!
 	 * If the node has no other RRSets than NSEC (and possibly RRSIGs),
+	 * or the node is not authoritative,
 	 * just remove the NSEC and its RRSIG, they are redundant
 	 */
-	if (node_rrtype_exists(b, KNOT_RRTYPE_NSEC)
-	    && knot_nsec_empty_nsec_and_rrsigs_in_node(b)) {
+	if (node_rrtype_exists(b, KNOT_RRTYPE_NSEC) &&
+	    (b->flags & NODE_FLAGS_NONAUTH || knot_nsec_empty_nsec_and_rrsigs_in_node(b))) {
 		ret = knot_nsec_changeset_remove(b, data->update);
 		if (ret != KNOT_EOK) {
 			return ret;
 		}
 		// Skip the 'b' node
+		return NSEC_NODE_SKIP;
+	}
+
+	if (b->rrset_count == 0 || b->flags & NODE_FLAGS_NONAUTH) {
 		return NSEC_NODE_SKIP;
 	}
 
@@ -447,7 +448,7 @@ static int check_nsec_bitmap(zone_node_t *node, void *ctx)
 	if (shall_no_nsec && nsec != NULL && nsec->count > 0) {
 		data->update->validation_hint.node = nsec_node->owner;
 		data->update->validation_hint.rrtype = data->nsec_type;
-		return KNOT_DNSSEC_ENSEC_BITMAP;
+		return KNOT_DNSSEC_EXTRA_NSEC;
 	}
 	if (shall_no_nsec) {
 		return KNOT_EOK;
@@ -764,7 +765,7 @@ int knot_nsec_check_chain(zone_update_t *update)
 	if (!zone_tree_is_empty(update->new_cont->nsec3_nodes)) {
 		update->validation_hint.node = update->zone->name;
 		update->validation_hint.rrtype = KNOT_RRTYPE_NSEC3;
-		return KNOT_DNSSEC_ENSEC_BITMAP;
+		return KNOT_DNSSEC_EXTRA_NSEC;
 	}
 
 	nsec_chain_iterate_data_t data = { 0, update, KNOT_RRTYPE_NSEC };
@@ -783,7 +784,7 @@ int knot_nsec_check_chain_fix(zone_update_t *update)
 	if (!zone_tree_is_empty(update->new_cont->nsec3_nodes)) {
 		update->validation_hint.node = update->zone->name;
 		update->validation_hint.rrtype = KNOT_RRTYPE_NSEC3;
-		return KNOT_DNSSEC_ENSEC_BITMAP;
+		return KNOT_DNSSEC_EXTRA_NSEC;
 	}
 
 	nsec_chain_iterate_data_t data = { 0, update, KNOT_RRTYPE_NSEC };

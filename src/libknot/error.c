@@ -58,6 +58,8 @@ static const struct error errors[] = {
 	{ KNOT_ERANGE,        "value is out of range" },
 	{ KNOT_EADDRNOTAVAIL, "address is not available" },
 	{ KNOT_ENOTDIR,       "not a directory" },
+	{ KNOT_EPERM,         "operation not permitted" },
+	{ KNOT_EROFS,         "read-only file system" },
 
 	{ KNOT_ERRNO_ERROR,   "unknown system error" },
 
@@ -174,6 +176,7 @@ static const struct error errors[] = {
 	{ KNOT_NO_PRIVATE_KEY,        "no private key" },
 	{ KNOT_NO_READY_KEY,          "no key ready for submission" },
 	{ KNOT_DNSSEC_EKEYTAG_LIMIT,  "many keys with equal keytag" },
+	{ KNOT_DNSSEC_EXTRA_NSEC,     "superfluous NSEC(3)" },
 
 	/* Terminator */
 	{ KNOT_ERROR, NULL }
