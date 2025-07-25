@@ -282,6 +282,7 @@ static const yp_item_t desc_xdp[] = {
 
 static const yp_item_t desc_control[] = {
 	{ C_LISTEN,  YP_TSTR, YP_VSTR = { "knot.sock" } },
+	{ C_BACKLOG, YP_TINT, YP_VINT = { 0, UINT16_MAX, 5 } },
 	{ C_TIMEOUT, YP_TINT, YP_VINT = { 0, INT32_MAX / 1000, 5, YP_STIME } },
 	{ C_COMMENT, YP_TSTR, YP_VNONE },
 	{ NULL }
@@ -418,6 +419,7 @@ static const yp_item_t desc_policy[] = {
 	                                   CONF_IO_FRLD_ZONES },
 	{ C_ZONE_MAX_TTL,        YP_TINT,  YP_VINT = { 0, INT32_MAX, YP_NIL, YP_STIME },
 	                                   CONF_IO_FRLD_ZONES },
+	{ C_KEYTAG_MODULO,       YP_TSTR,  YP_VSTR = { "0/1" }, YP_FNONE, { check_modulo } }, \
 	{ C_KSK_LIFETIME,        YP_TINT,  YP_VINT = { 0, UINT32_MAX, 0, YP_STIME },
 	                                   CONF_IO_FRLD_ZONES },
 	{ C_ZSK_LIFETIME,        YP_TINT,  YP_VINT = { 0, UINT32_MAX, DAYS(30), YP_STIME },
@@ -460,9 +462,11 @@ static const yp_item_t desc_policy[] = {
 #define ZONE_ITEMS(FLAGS) \
 	{ C_STORAGE,             YP_TSTR,  YP_VSTR = { STORAGE_DIR }, FLAGS }, \
 	{ C_FILE,                YP_TSTR,  YP_VNONE, FLAGS }, \
-	{ C_MASTER,              YP_TREF,  YP_VREF = { C_RMT, C_RMTS }, YP_FMULTI, { check_ref } }, \
+	{ C_MASTER,              YP_TREF,  YP_VREF = { C_RMT, C_RMTS }, YP_FMULTI | CONF_REF_EMPTY, \
+	                                   { check_ref } }, \
 	{ C_DDNS_MASTER,         YP_TREF,  YP_VREF = { C_RMT }, YP_FNONE, { check_ref_empty } }, \
-	{ C_NOTIFY,              YP_TREF,  YP_VREF = { C_RMT, C_RMTS }, YP_FMULTI, { check_ref } }, \
+	{ C_NOTIFY,              YP_TREF,  YP_VREF = { C_RMT, C_RMTS }, YP_FMULTI | CONF_REF_EMPTY, \
+	                                   { check_ref } }, \
 	{ C_ACL,                 YP_TREF,  YP_VREF = { C_ACL }, YP_FMULTI, { check_ref } }, \
 	{ C_MASTER_PIN_TOL,      YP_TINT,  YP_VINT = { 0, UINT32_MAX, 0, YP_STIME } }, \
 	{ C_PROVIDE_IXFR,        YP_TBOOL, YP_VBOOL = { true } }, \
@@ -480,7 +484,7 @@ static const yp_item_t desc_policy[] = {
 	{ C_DNSSEC_SIGNING,      YP_TBOOL, YP_VNONE, FLAGS }, \
 	{ C_DNSSEC_VALIDATION,   YP_TBOOL, YP_VNONE, FLAGS }, \
 	{ C_DNSSEC_POLICY,       YP_TREF,  YP_VREF = { C_POLICY }, FLAGS, { check_ref_dflt } }, \
-	{ C_DS_PUSH,             YP_TREF,  YP_VREF = { C_RMT, C_RMTS }, YP_FMULTI | FLAGS, \
+	{ C_DS_PUSH,             YP_TREF,  YP_VREF = { C_RMT, C_RMTS }, YP_FMULTI | CONF_REF_EMPTY | FLAGS, \
 	                                   { check_ref } }, \
 	{ C_REVERSE_GEN,         YP_TDNAME,YP_VNONE, FLAGS | CONF_IO_FRLD_ZONES }, \
 	{ C_SERIAL_POLICY,       YP_TOPT,  YP_VOPT = { serial_policies, SERIAL_POLICY_INCREMENT } }, \

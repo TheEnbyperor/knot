@@ -89,15 +89,15 @@ zones. There is no inheritance between templates; they are exclusive. The
 Access control list (ACL)
 =========================
 
-Some types of incoming DNS requests must be authorized before they can be
-processed by the server. A zone can have configured :ref:`zone_acl` which is
-a sequence of :ref:`rules <ACL section>` describing what requests are authorized.
-By default if :ref:`automatic ACL <server_automatic-acl>` is not enabled, all requests,
-which require authorization, are denied.
+Normal DNS queries are always allowed. All other DNS requests must be
+authorized before they can be processed by the server. A zone can have
+configured :ref:`ACL <ACL section>` which is a sequence of rules describing
+what requests are authorized. An :ref:`automatic ACL <server_automatic-acl>`
+feature can be used to simplify ACL management.
 
-Every ACL rule can allow or deny one or more request types based on the
-source IP address, network subnet, or address range and/or if the request is
-secured by a given TSIG key. See :doc:`keymgr -t<man_keymgr>` on how
+Every ACL rule can allow or deny one or more request types (:ref:`actions <acl_action>`)
+based on the source IP address, network subnet, or address range and/or if the
+request is secured by a given TSIG key. See :doc:`keymgr -t<man_keymgr>` on how
 to generate a TSIG key.
 
 If there are multiple ACL rules assigned to a zone, they are applied in the
