@@ -14,7 +14,7 @@ import time
 import dns.message
 import dns.query
 import dns.update
-from subprocess import Popen, PIPE, check_call, CalledProcessError, check_output, DEVNULL
+from subprocess import Popen, PIPE, check_call, CalledProcessError, check_output, run, DEVNULL
 from dnstest.utils import *
 from dnstest.context import Context
 import dnstest.config
@@ -900,14 +900,14 @@ class Server(object):
         else:
             self.zones[zone.name].zfile.upd_file(storage=storage, version=version)
 
-    def random_ddns(self, zone, allow_empty=True, tries=20):
+    def random_ddns(self, zone, allow_empty=True, allow_ns=True, tries=20):
         zone = zone_arg_check(zone)
 
         for i in range(tries):
             up = self.update(zone)
 
             while True:
-                changes = self.zones[zone.name].zfile.gen_rnd_ddns(up)
+                changes = self.zones[zone.name].zfile.gen_rnd_ddns(up, allow_ns)
                 if allow_empty or changes > 0:
                     break
 
@@ -984,6 +984,9 @@ class Bind(Server):
     def flush(self, zone=None, wait=False):
         zone_name = (" " + zone.name) if zone else ""
         self.ctl("sync%s" % zone_name, wait=wait)
+
+    def bind_version(self):
+        return tuple(map(int, run([self.daemon_bin, '-v'], stdout=PIPE, stderr=PIPE, text=True).stdout.replace('BIND ', '').split('-')[0].split('.')))
 
     def check_option(self, option):
         proc = Popen([params.bind_checkconf_bin, "/dev/fd/0"],
@@ -1087,6 +1090,8 @@ class Bind(Server):
             self._int(s, "zone-propagation-delay", z.dnssec.propagation_delay)
             self._int(s, "signatures-validity", z.dnssec.rrsig_lifetime)
             self._int(s, "signatures-refresh", z.dnssec.rrsig_refresh)
+            if self.bind_version() >= (9, 18, 28):
+                s.item("signatures-jitter", "0")
             s.item("publish-safety", "1")
             s.item("retire-safety", "1")
             s.item("parent-ds-ttl", "5")

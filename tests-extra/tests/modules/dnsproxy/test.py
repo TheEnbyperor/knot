@@ -3,24 +3,33 @@
 ''' Check 'dnsproxy' query module functionality. '''
 
 from dnstest.test import Test
+from dnstest.keys import Tsig
 from dnstest.module import ModDnsproxy
 import dnstest.keys
 
-t = Test(tsig=True)
+TSIG = Tsig() # Use the same TSIG key for all communication.
+t = Test(tsig=TSIG)
 
 ModDnsproxy.check()
 
 # Initialize server configuration
 zone_common1 = t.zone("test", storage=".", file_name="test.local_zone")
 zone_common2 = t.zone("test", storage=".", file_name="test.remote_zone")
-zone_local = t.zone_rnd(1)
-zone_remote = t.zone_rnd(1)
+while True:
+    zone_local = t.zone_rnd(1)
+    if zone_local[0].name != zone_common1[0].name:
+        break;
+while True:
+    zone_remote = t.zone_rnd(1)
+    if zone_remote[0].name != zone_common2[0].name and \
+       zone_remote[0].name != zone_local[0].name:
+        break;
 
-local = t.server("knot")
+local = t.server("knot", tsig=TSIG)
 t.link(zone_common1, local)
 t.link(zone_local, local)
 
-remote = t.server("knot")
+remote = t.server("knot", tsig=TSIG)
 t.link(zone_common2, remote)
 t.link(zone_remote, remote)
 
@@ -45,7 +54,7 @@ def fallback_checks(server, zone_local, zone_remote, nxdomain):
     resp = server.dig(zone_local.name, "SOA")
     resp.check(rcode="NOERROR", flags="AA")
 
-    # Remote OK, TSIG not forwarded if fallback.
+    # Remote OK.
     resp = server.dig(zone_remote.name, "SOA", tsig=True)
     if (is_subzone(zone_remote, zone_local) and not nxdomain):
         resp.check(rcode="NXDOMAIN", flags="AA")
@@ -60,7 +69,7 @@ def fallback_checks(server, zone_local, zone_remote, nxdomain):
     resp = server.dig("test", "AXFR", tsig=True)
     resp.check_xfr(rcode="NOERROR")
 
-    # Remote XFR NOK, no TSIG
+    # Remote XFR not possible in the fallback mode - not authoritative.
     resp = server.dig(zone_remote.name, "AXFR")
     resp.check_xfr(rcode="NOTAUTH")
 
@@ -98,6 +107,10 @@ resp.check(rcode="REFUSED", noflags="AA")
 # Remote OK.
 resp = local.dig(zone_remote[0].name, "SOA")
 resp.check(rcode="NOERROR", flags="AA")
+
+# Remote AXFR OK.
+resp = local.dig(zone_remote[0].name, "AXFR", tsig=True)
+resp.check_xfr(rcode="NOERROR")
 
 # Remote NOK, not existing owner.
 resp = local.dig("u-n-k-n-o-w-n." + zone_remote[0].name, "A")
